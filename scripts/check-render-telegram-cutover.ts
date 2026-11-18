@@ -33,7 +33,7 @@ const OTHER_SHA = "b".repeat(40);
 const CURRENT_URL = "https://flowpilot-prod.vercel.app/api/telegram/webhook";
 const DB_URL =
   "postgresql://user:pass@ep-little-mouse-a5nh644n-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require";
-const TOKEN = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij";
+const FAKE_SIGNER_VALUE = "synthetic-cutover-value";
 const FIXED_NOW = 1_700_000_000_000;
 
 const readinessOk = {
@@ -166,7 +166,7 @@ function createTelegramFake(options: TelegramFakeOptions = {}) {
     fetchImpl,
     apiHost: "https://api.telegram.org",
     credentialsResolver: {
-      resolve: async () => ({ ok: true, value: TOKEN }),
+      resolve: async () => ({ ok: true, value: FAKE_SIGNER_VALUE }),
     },
   } as unknown as TelegramApiDeps;
 
@@ -179,7 +179,12 @@ function createTelegramFake(options: TelegramFakeOptions = {}) {
 }
 
 const fakeResolver = {
-  resolve: async () => ({ ok: true as const, value: TOKEN }),
+  resolve: async () => ({
+    ok: true as const,
+    kind: "RUNTIME" as const,
+    reference: "fp:render-cutover-test",
+    value: FAKE_SIGNER_VALUE,
+  }),
 };
 
 function preflightParams(
@@ -231,7 +236,7 @@ function createDeps(
         return options.verifyRenderService(params);
       }
       return {
-        ok: true,
+        ok: true as const,
         serviceId: RENDER_TELEGRAM_CUTOVER_TARGET.serviceId,
         serviceName: "Yakfi",
         workspaceId: RENDER_TELEGRAM_CUTOVER_TARGET.workspaceId,
@@ -290,7 +295,7 @@ async function main(): Promise<void> {
       telegram: {
         lastErrorDate: 1_700_000_000,
         lastErrorMessage:
-          "Conflict from bot123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij",
+          "Delivery failed at postgresql://user:pass@ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech/neondb",
       },
       onVerifyRenderService: (params) => serviceCalls.push(params),
     });
@@ -308,7 +313,8 @@ async function main(): Promise<void> {
         result.allowedUpdates.join(",") === "message,callback_query" &&
         result.lastErrorDate === 1_700_000_000 &&
         result.lastErrorMessage !== null &&
-        !result.lastErrorMessage.includes("bot123456:") &&
+        !result.lastErrorMessage.includes("user:pass") &&
+        result.lastErrorMessage.includes("postgresql://***") &&
         result.actionsCredentialResolved === true &&
         result.botIdentityVerified === true &&
         result.renderService?.serviceId ===
@@ -404,7 +410,7 @@ async function main(): Promise<void> {
         result.expectedCommitSha === SHA &&
         readinessParams.length === 1 &&
         readinessParams[0]?.expectedCommitSha === SHA &&
-        readinessParams[0]?.cutoverSignerCred === TOKEN,
+        readinessParams[0]?.cutoverSignerCred === FAKE_SIGNER_VALUE,
     );
   }
 
@@ -524,7 +530,11 @@ async function main(): Promise<void> {
     const unresolved = {
       ...deps,
       credentialsResolver: {
-        resolve: async () => ({ ok: false as const, code: "NOT_FOUND" }),
+        resolve: async () => ({
+          ok: false as const,
+          code: "UNRESOLVED_REFERENCE" as const,
+          message: "synthetic unresolved",
+        }),
       },
     };
     const preflight = await preflightRenderTelegramCutover(
@@ -566,19 +576,20 @@ async function main(): Promise<void> {
 
   // ─── 8. Controlled successful apply ──────────────────────────────────────
   {
-    let captured: Parameters<RenderTelegramCutoverDeps["switchWebhook"]>[0] | null =
-      null;
+    const capturedParamsList: Array<
+      Parameters<RenderTelegramCutoverDeps["switchWebhook"]>[0]
+    > = [];
     const { deps, getSwitchCalls, getReadinessCalls } = createDeps({
       switchResult: switchedOutcome,
       onSwitch: (params) => {
-        captured = params;
+        capturedParamsList.push(params);
       },
     });
     const apply = await applyRenderTelegramCutover(
       { ...preflightParams(), expectedCurrentWebhookUrl: CURRENT_URL },
       deps,
     );
-    const capturedParams = captured;
+    const capturedParams = capturedParamsList[0];
     check(
       "P8. Controlled apply performs exactly one switch with the fixed Render target, exact allowed updates, and fresh preflight",
       apply.status === "SWITCHED" &&
@@ -587,7 +598,7 @@ async function main(): Promise<void> {
         apply.webhookSecretHashPersisted === true &&
         getSwitchCalls() === 1 &&
         getReadinessCalls() === 2 &&
-        capturedParams !== null &&
+        capturedParams !== undefined &&
         capturedParams.businessId ===
           RENDER_TELEGRAM_CUTOVER_TARGET.businessId &&
         capturedParams.connectionId ===
@@ -812,9 +823,9 @@ async function main(): Promise<void> {
 
   // ─── 15. Signed Render readiness verifier ────────────────────────────────
   {
-    let observedHeaders: Headers | null = null;
+    const observedHeadersList: Headers[] = [];
     const fetchImpl: typeof fetch = async (_input, init) => {
-      observedHeaders = new Headers(init?.headers);
+      observedHeadersList.push(new Headers(init?.headers));
       return new Response(
         JSON.stringify({
           ok: true,
@@ -838,7 +849,7 @@ async function main(): Promise<void> {
         expectedCommitSha: SHA,
         expectedVersion: VERSION,
         databaseUrl: DB_URL,
-        cutoverSignerCred: TOKEN,
+        cutoverSignerCred: FAKE_SIGNER_VALUE,
       },
       { fetchImpl, now: () => FIXED_NOW },
     );
@@ -848,7 +859,7 @@ async function main(): Promise<void> {
         expectedCommitSha: SHA,
         expectedVersion: VERSION,
         databaseUrl: DB_URL,
-        cutoverSignerCred: TOKEN,
+        cutoverSignerCred: FAKE_SIGNER_VALUE,
       },
       {
         fetchImpl: async () => new Response("{}", { status: 401 }),
@@ -861,17 +872,17 @@ async function main(): Promise<void> {
         expectedCommitSha: SHA,
         expectedVersion: VERSION,
         databaseUrl: DB_URL,
-        cutoverSignerCred: TOKEN,
+        cutoverSignerCred: FAKE_SIGNER_VALUE,
       },
       { fetchImpl, now: () => FIXED_NOW },
     );
-    const capturedHeaders = observedHeaders;
+    const capturedHeaders = observedHeadersList[0];
     check(
       "P15. Signed Render readiness verifies identity, DB, SHA/version, and rejects unauthorized/legacy origins",
       ok.ok === true &&
         ok.credentialResolved === true &&
         ok.databaseHost === "ep-little-mouse-a5nh644n.us-east-2.aws.neon.tech" &&
-        capturedHeaders !== null &&
+        capturedHeaders !== undefined &&
         capturedHeaders.get("x-flowpilot-cutover-bot-id") ===
           RENDER_TELEGRAM_CUTOVER_TARGET.botExternalId &&
         capturedHeaders.get("x-flowpilot-cutover-timestamp") ===

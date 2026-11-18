@@ -1045,13 +1045,14 @@ export async function switchTelegramBotWebhook(
     : [];
 
   let targetUpdates: string[];
-  if (params.allowedUpdates !== undefined) {
-    const requested = params.allowedUpdates
+  const requestedInput = params.allowedUpdates;
+  if (requestedInput !== undefined) {
+    const requested = requestedInput
       .map((value) => value.trim())
       .filter((value) => value.length > 0);
     if (
       requested.length === 0 ||
-      requested.length !== params.allowedUpdates.length
+      requested.length !== requestedInput.length
     ) {
       return {
         ok: false,
