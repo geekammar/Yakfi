@@ -12,9 +12,9 @@ import {
 import type { TelegramConnection } from "@/types/domain";
 
 import {
+  RENDER_TELEGRAM_CUTOVER_TARGET,
   applyRenderTelegramCutover,
   preflightRenderTelegramCutover,
-  RENDER_TELEGRAM_CUTOVER_TARGET,
   type RenderTelegramCutoverDeps,
   type RenderTelegramPreflightParams,
 } from "./render-telegram-cutover";
@@ -215,9 +215,7 @@ function createDeps(
       params: Parameters<RenderTelegramCutoverDeps["verifyRenderService"]>[0],
     ) => void;
     onVerifyReadiness?: (
-      params: Parameters<
-        RenderTelegramCutoverDeps["verifyRenderReadiness"]
-      >[0],
+      params: Parameters<RenderTelegramCutoverDeps["verifyRenderReadiness"]>[0],
     ) => void;
   } = {},
 ) {
@@ -635,8 +633,7 @@ async function main(): Promise<void> {
     const apply = await applyRenderTelegramCutover(
       {
         ...preflightParams(),
-        expectedCurrentWebhookUrl:
-          RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+        expectedCurrentWebhookUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
       },
       deps,
     );

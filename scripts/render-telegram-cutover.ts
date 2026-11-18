@@ -93,14 +93,12 @@ export type RenderTelegramCutoverDeps = {
   >;
   credentialsResolver: Pick<CredentialsResolver, "resolve">;
   telegramApi: TelegramApiDeps;
-  verifyRenderService: (
-    params: {
-      serviceId: string;
-      renderApiKey: string;
-      expectedWorkspaceId?: string;
-      expectedRegion?: string;
-    },
-  ) => Promise<VerifiedRenderService>;
+  verifyRenderService: (params: {
+    serviceId: string;
+    renderApiKey: string;
+    expectedWorkspaceId?: string;
+    expectedRegion?: string;
+  }) => Promise<VerifiedRenderService>;
   verifyRenderReadiness: typeof verifyRenderRuntimeReadiness;
   switchWebhook: (
     params: SwitchTelegramWebhookParams,
@@ -233,8 +231,7 @@ async function resolveSelectedRuntimeCredential(
   if (
     connection.id !== RENDER_TELEGRAM_CUTOVER_TARGET.connectionId ||
     connection.businessId !== RENDER_TELEGRAM_CUTOVER_TARGET.businessId ||
-    connection.botExternalId !==
-      RENDER_TELEGRAM_CUTOVER_TARGET.botExternalId ||
+    connection.botExternalId !== RENDER_TELEGRAM_CUTOVER_TARGET.botExternalId ||
     connection.botUsername?.toLowerCase() !==
       RENDER_TELEGRAM_CUTOVER_TARGET.botUsername.toLowerCase()
   ) {
@@ -559,9 +556,7 @@ export async function applyRenderTelegramCutover(
       "APPLY_REQUIRES_CHECKOUT_EQUALS_DEPLOYED",
     );
   }
-  if (
-    preflight.currentWebhookUrl !== expectedCurrentValidation.normalizedUrl
-  ) {
+  if (preflight.currentWebhookUrl !== expectedCurrentValidation.normalizedUrl) {
     return applyResult(preflight, "BLOCKED", "CURRENT_WEBHOOK_URL_MISMATCH");
   }
   if (!preflight.readyForApply) {
@@ -809,12 +804,8 @@ async function main(): Promise<void> {
   const databaseUrl = (process.env.DATABASE_URL ?? "").trim();
   const masterKey = (process.env.CREDENTIAL_MASTER_KEY ?? "").trim();
   const renderApiKey = (process.env.RENDER_API_KEY_SOURCE ?? "").trim();
-  const expectedCheckoutSha = (
-    process.env.EXPECTED_CHECKOUT_SHA ?? ""
-  ).trim();
-  const expectedDeployedSha = (
-    process.env.EXPECTED_DEPLOYED_SHA ?? ""
-  ).trim();
+  const expectedCheckoutSha = (process.env.EXPECTED_CHECKOUT_SHA ?? "").trim();
+  const expectedDeployedSha = (process.env.EXPECTED_DEPLOYED_SHA ?? "").trim();
   const actualCheckoutSha = (process.env.GITHUB_SHA ?? "").trim();
   if (!databaseUrl || !masterKey) {
     throw new Error("MISSING_RUNTIME_CREDENTIALS");
@@ -859,8 +850,7 @@ async function main(): Promise<void> {
   const result = await applyRenderTelegramCutover(
     {
       ...baseParams,
-      expectedCurrentWebhookUrl:
-        process.env.EXPECTED_CURRENT_WEBHOOK_URL ?? "",
+      expectedCurrentWebhookUrl: process.env.EXPECTED_CURRENT_WEBHOOK_URL ?? "",
     },
     deps,
   );
