@@ -1,5 +1,36 @@
 # FlowPilot — Build State
 
+## Render configuration alignment and read-only cutover preflight (Draft PR, v0.79.17) — 18 November 2026
+
+- Baseline: `main` `629d05ffbe2c2dc6ba6d0d807556de518bb0fd7e` / `0.79.16`;
+  PR90 merged. PR88 remains open, Draft, and untouched.
+- Live Render: service `Yakfi` (`srv-dbv0igutlv9c73fe4990`) in
+  `My Workspace` (`tea-db9st3gm7kps73ek9op0`), `ohio`, Starter `0.5c-512mb`,
+  URL `https://yakfi.onrender.com`. Deployment `dep-dbv0vm7f3r2c73ent7ug` is
+  live at `629d05f` / `0.79.16`; `/api/health/live` and `/api/health` return
+  HTTP `200` with `deploymentReady=true`, `database=connected`, and
+  `missingEnvVars=[]`.
+- Configuration: direct transfer of `DATABASE_URL` + `CREDENTIAL_MASTER_KEY`
+  completed; `BETTER_AUTH_SECRET` and `OPENROUTER_API_KEY` present by name only;
+  Render auto-deploy On Commit (`autoDeployTrigger=commit`) for `main`.
+- Candidate: `render.yaml` declared name `yakfi-web` → `Yakfi` and
+  `autoDeployTrigger: off` → `commit`; `CURRENT_STATE.md` and this ledger updated.
+  The existing service is managed through the Render Dashboard/API; the
+  Blueprint has not been imported/applied, and matching names do not prove
+  Blueprint ownership.
+- Read-only cutover preflight: run `44406835170` verified selected DB/bot
+  credential and fixed business/connection/bot identity as `HEALTHY_LOCAL_KEY`
+  with 30 migrations `UP_TO_DATE`; Render readiness HTTP `200`. Telegram
+  `getWebhookInfo` and the signed Render credential-readiness proof were **not**
+  obtained: `production-telegram-repair` check `44406191808` failed
+  `CREDENTIALS_UNAVAILABLE`, and the existing `cutover-main-runtime-dry-run`
+  `44406411920` failed `DESTINATION_NOT_READY` because
+  `switch-test-bot-webhook.ts` is Vercel-hardcoded. No webhook was moved;
+  pending backlog remains **UNKNOWN** and must be checked at actual cutover.
+- No deployment trigger, Blueprint application, secret transfer repetition, key
+  rotation, migration/DB write, Telegram send, paid AI call, Rabet change, or
+  PR88 change was performed in this task.
+
 ## PR89 merged and direct Render transfer simplification (Draft PR, v0.79.16) — 18 November 2026
 
 - Verified baseline: PR89 merged into `main` at

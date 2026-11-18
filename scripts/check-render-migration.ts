@@ -156,12 +156,13 @@ async function main(): Promise<void> {
       renderYaml.includes("pnpm db:generate && pnpm build"),
   );
   check(
-    "R1.3 render.yaml configures single starter Node web service in ohio on 0.0.0.0:$PORT",
-    renderYaml.includes("type: web") &&
+    "R1.3 render.yaml configures the existing Yakfi service as a single starter Node web service in ohio on 0.0.0.0:$PORT with auto-deploy on commit",
+    renderYaml.includes("name: Yakfi") &&
+      renderYaml.includes("type: web") &&
       renderYaml.includes("runtime: node") &&
       renderYaml.includes("plan: starter") &&
       renderYaml.includes("region: ohio") &&
-      renderYaml.includes("autoDeployTrigger: off") &&
+      renderYaml.includes("autoDeployTrigger: commit") &&
       renderYaml.includes("healthCheckPath: /api/health/live") &&
       renderYaml.includes("startCommand: pnpm run start:render") &&
       renderStartScript.includes("--hostname 0.0.0.0") &&

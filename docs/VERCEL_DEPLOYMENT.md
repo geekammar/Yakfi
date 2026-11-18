@@ -264,9 +264,13 @@ deployment log (Builds → failed deployment → inspect) cover the rest.
 
 - **Workspace:** `My Workspace` (`tea-db9st3gm7kps73ek9op0`), owner account
   `sarazainx@gmail.com` (Hobby workspace; **no** paid workspace upgrade).
-- **Service:** one native Node web service (`yakfi-web` in `render.yaml`),
-  `plan: starter` (`0.5 CPU`, `512 MB RAM`, ~$7/month), `region: ohio` (AWS
-  `us-east-2`, co-located with existing Neon PostgreSQL `us-east-2`).
+- **Service:** one native Node web service (`Yakfi` in `render.yaml`; live
+  service `srv-dbv0igutlv9c73fe4990`), `plan: starter` (`0.5 CPU`, `512 MB RAM`,
+  ~$7/month), `region: ohio` (AWS `us-east-2`, co-located with existing Neon
+  PostgreSQL `us-east-2`). The live service is currently managed through the
+  Render Dashboard/API; this Blueprint has **not** been imported or applied.
+  The declared name matches the live service, but that does not prove
+  Blueprint ownership or adoption.
 - **Scope boundary:** keep the existing Neon PostgreSQL database and existing
   Telegram bots. Add **no** Render Postgres, Redis/Key-Value, worker, queue,
   persistent disk, Docker container, or Cron Job.
@@ -306,9 +310,10 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
   (Executes `next start --hostname 0.0.0.0 --port "${PORT:-10000}"`.)
 
 - **Health Check Path (continuous Render liveness):** `/api/health/live`
-- **Auto-Deploy Trigger:** `off` during cutover preparation (`render.yaml`
-  `autoDeployTrigger: off`) so unconfigured or unmigrated commits never deploy
-  automatically.
+- **Auto-Deploy Trigger:** `off` during initial cutover preparation so
+  unconfigured or unmigrated commits never deploy automatically. After live
+  readiness, On Commit (`render.yaml` `autoDeployTrigger: commit`); the current
+  live service has completed readiness and is On Commit.
 
 **Required application variables on Render** (names only; see
 `config/render-env-inventory.json` and `docs/ENVIRONMENT_VARIABLES.md`):
@@ -392,13 +397,14 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
      `OPENROUTER_API_KEY`) in the owner vault **before** entering them into
      Render. Render alone is never treated as the backup.
 2. **Create Service & Pin Exact URLs Before Final Build:**
-   - Create the single `yakfi-web` Starter service (`srv-...`) in `My Workspace`
-     (`tea-db9st3gm7kps73ek9op0`), region `ohio`, `autoDeployTrigger: off`.
+   - Create the single `Yakfi` Starter service (`srv-...`) in `My Workspace`
+     (`tea-db9st3gm7kps73ek9op0`), region `ohio`, with
+     `autoDeployTrigger: off` during initial setup.
    - Create/obtain the Render API key and add it as the GitHub Actions
      repository secret `RENDER_API_KEY` (value never in Git or chat). It is
      required by the direct-transfer service verification and per-key update.
    - Confirm the exact assigned HTTPS origin (e.g.
-     `https://yakfi-web.onrender.com`). Set both `NEXT_PUBLIC_APP_URL` and
+     `https://yakfi.onrender.com`). Set both `NEXT_PUBLIC_APP_URL` and
      `BETTER_AUTH_URL` to that exact HTTPS origin (no trailing slash), populate
      `BETTER_AUTH_SECRET` and `OPENROUTER_API_KEY` from the vault, then transfer
      only `DATABASE_URL` + `CREDENTIAL_MASTER_KEY` from the existing GitHub
@@ -408,7 +414,7 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
      `render_service_id=srv-...`, `allowlist=DATABASE_URL,CREDENTIAL_MASTER_KEY`
      (default), and `dry_run=true` first. The read-only
      `verify-selected-runtime` preflight must already have passed at this exact
-     SHA (it did for `a6a2021...`). Inspect the sanitized result, then run
+     SHA (it did for `629d05f...`). Inspect the sanitized result, then run
      the same mode with `dry_run=false`; the prepare job always performs a fresh
      read-only dry-run before the apply job writes. Per-key PUTs preserve every
      unrelated Render environment variable. The optional encrypted
@@ -460,6 +466,14 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
        `FLOWPILOT_AI_GLOBAL_STOP=true` so queued messages persist safely as
        staff handoffs with zero paid AI calls and zero automated bookings, or
        explicit owner-signed drop).
+   - **Current tooling limitation (18 November 2026):** the existing
+     `cutover-main-runtime-*` operations and `switch-test-bot-webhook.ts` are
+     hardcoded to the Vercel Production origin; they cannot target
+     `https://yakfi.onrender.com/api/telegram/webhook`. The Render-capable
+     `verifyRenderCutoverReadinessAndBacklog` exists but is not exposed by an
+     existing workflow/CLI. Do **not** run `cutover-main-runtime-apply` for
+     Render; use a reviewed Render-targeted read-only preflight and switch tool
+     after separate approval.
 6. **Post-Cutover Verification & Release Tagging:**
    - Re-verify `getWebhookInfo` (`url === https://<render-origin>/api/telegram/webhook`,
      `allowed_updates` includes `message` and `callback_query`).
@@ -468,9 +482,11 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
 
 ### 7.6 Rollback Plan & PR #88 Separation
 
-- **Application rollback target:** roll back in Render Dashboard → Deploys (or
-  Render API) to the **previous known-good Render deployment / commit SHA**, and
-  re-verify `GET /api/health` HTTP `200` + exact rolled-back `commitSha`.
+- **Application rollback target:** the current live deployment
+  `dep-dbv0vm7f3r2c73ent7ug` is the **first successful Render deployment**; there
+  is no earlier known-good Render deployment to roll back to. A future rollback
+  must target a later verified deployment or a reviewed forward fix. Do not
+  claim a tested Render rollback exists.
 - **Vercel is NOT a rollback target:** while Vercel returns HTTP `402`
   `DEPLOYMENT_DISABLED` (and its Production Sensitive secrets cannot be read
   back), never treat Vercel as an available fallback runtime.
@@ -478,9 +494,10 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
   intact (`ep-little-mouse-a5nh644n...` active; `ep-tiny-grass-a5e63jev...`
   preserved inactive archive). Never drop tables or reset schemas.
 - **PR #88 separation:** draft PR #88 (`feat/durable-turn-usage-cost-evidence`)
-  and its additive Prisma migrations remain an independent reviewed decision.
-  Coordinate `package.json` SemVer (`0.79.15` → `0.79.16`) at final merge time
-  so `pnpm check:version` passes monotonically without weakening the gate.
+  and its additive Prisma migrations remain an independent reviewed decision at
+  `0.79.15`; it is not merged or modified. This branch is based on `main`
+  `0.79.16` and carries `0.79.17`; coordinate any later PR88 merge with the
+  then-current `main` version so `pnpm check:version` remains monotonic.
 
 ### 7.7 Automatic Deploy Activation (after initial readiness)
 
