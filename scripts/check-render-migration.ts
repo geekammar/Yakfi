@@ -12,7 +12,17 @@
  * 7. Owner-encrypted secret bundle, restoration check, workspace pinning
  *    (`tea-db9st3gm7kps73ek9op0`), allowlist & webhook backlog policy
  */
-import { readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
 import { isPublicPath } from "@/lib/public-paths";
@@ -27,6 +37,12 @@ import {
   isVercelPreview,
   resolveAppUrl,
 } from "@/lib/url-resolver";
+import { encryptCredential } from "@/server/credentials/credential-crypto";
+import {
+  TARGET,
+  type Connection,
+  type Credential,
+} from "@/server/credentials/test-bot-recovery";
 import { isTypeSafeJevPreferred } from "@/server/integrations/ai/factory";
 import { signCutoverReadiness } from "@/server/operator/cutover-readiness";
 
@@ -34,6 +50,7 @@ import nextConfig, { PLATFORM_NEUTRAL_PWA_HEADERS } from "../next.config";
 import {
   CONFIRMED_RENDER_REGION,
   CONFIRMED_RENDER_WORKSPACE_ID,
+  PRE_SERVICE_EXPORT_SENTINEL,
   encryptAllowlistedSecretsForOwner,
   generateOwnerRecoveryKeypair,
   inspectRecoverySources,
@@ -41,6 +58,8 @@ import {
   transferAllowlistedSecretsToRender,
   verifyOwnerEncryptedBundle,
   verifyRenderCutoverReadinessAndBacklog,
+  verifySelectedRuntimePreflight,
+  writeOwnerRecoveryKeypairExclusive,
 } from "./render-vault-tool";
 import {
   evaluateLiveHealthResponse,
@@ -476,11 +495,18 @@ async function main(): Promise<void> {
   );
   const recoveryWorkflowYaml = readFileSync(opsWorkflowPath, "utf8");
   check(
-    "R7.1 render-migration-ops.yml is manual workflow_dispatch only (never runs in PR CI) and enforces exact 40-char SHA",
+    "R7.1 render-migration-ops.yml enforces SHA + private-key ban, verify-selected-runtime, and always() backup-before-transfer",
     recoveryWorkflowYaml.includes("workflow_dispatch:") &&
       !recoveryWorkflowYaml.includes("pull_request:") &&
       !recoveryWorkflowYaml.includes("\n  push:") &&
       recoveryWorkflowYaml.includes("expected_commit_sha") &&
+      recoveryWorkflowYaml.includes("owner_restoration_proof") &&
+      recoveryWorkflowYaml.includes("verify-selected-runtime") &&
+      recoveryWorkflowYaml.includes("PRIVATE_KEY_INPUT_FORBIDDEN") &&
+      recoveryWorkflowYaml.includes("prepare-and-deliver-backup:") &&
+      recoveryWorkflowYaml.includes("apply-render-transfer:") &&
+      recoveryWorkflowYaml.includes("- prepare-and-deliver-backup") &&
+      !recoveryWorkflowYaml.includes("success() &&") &&
       recoveryWorkflowYaml.includes("yakfi-owner-encrypted-bundle") &&
       recoveryWorkflowYaml.includes("rm -rf /tmp/yakfi-encrypted-out"),
   );
@@ -491,6 +517,22 @@ async function main(): Promise<void> {
     "postgresql://user:pass@ep-little-mouse-a5nh644n-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require";
   const syntheticKeyHex = "a1b2c3d4".repeat(8);
   const testServiceId = "srv-cdefghijklmnopqrstuv";
+
+  // Pre-service export (before Render service exists)
+  const preServiceBundle = encryptAllowlistedSecretsForOwner({
+    recipient: ownerPair.recipient,
+    allowlist: parseAllowlist("DATABASE_URL,CREDENTIAL_MASTER_KEY"),
+    sourceValues: {
+      DATABASE_URL: syntheticDbConn,
+      CREDENTIAL_MASTER_KEY: syntheticKeyHex,
+    },
+    commitSha: exactSha,
+    serviceId: "",
+  });
+  const preServiceRestore = verifyOwnerEncryptedBundle({
+    bundle: preServiceBundle,
+    privateKey: ownerPair.privateKey,
+  });
 
   const encryptedBundle = encryptAllowlistedSecretsForOwner({
     recipient: ownerPair.recipient,
@@ -528,20 +570,285 @@ async function main(): Promise<void> {
       err instanceof Error && err.message === "DISALLOWED_SECRET_KEY";
   }
 
+  let preServiceTransferRejected = false;
+  try {
+    await transferAllowlistedSecretsToRender({
+      expectedCommitSha: exactSha,
+      actualCommitSha: exactSha,
+      serviceId: "",
+      renderApiKey: "rnd_placeholder_example_key",
+      ownerRecipient: ownerPair.recipient,
+      allowlist: ["DATABASE_URL"],
+      sourceValues: { DATABASE_URL: syntheticDbConn },
+      dryRun: true,
+    });
+  } catch (err: unknown) {
+    preServiceTransferRejected =
+      err instanceof Error && err.message === "INVALID_RENDER_SERVICE_ID";
+  }
+
   const verifiedJoined = validRestore.ok
     ? validRestore.verifiedKeys.join(",")
     : "";
+  const validProof = validRestore.ok ? validRestore.restorationProof : "";
+  const preServiceProof = preServiceRestore.ok
+    ? preServiceRestore.restorationProof
+    : "";
   check(
-    "R7.2 Encrypted owner bundle omits plaintext, passes owner restoration check, and fails closed on wrong key, AAD tamper, or disallowed key",
+    "R7.2 Pre-service & service-bound encrypted bundles omit plaintext, pass restoration check, and reject service-less transfer",
     !serializedBundle.includes("ep-little-mouse-a5nh644n") &&
       !serializedBundle.includes(syntheticKeyHex) &&
+      preServiceBundle.metadata.serviceId === PRE_SERVICE_EXPORT_SENTINEL &&
+      preServiceRestore.ok === true &&
+      preServiceRestore.serviceId === PRE_SERVICE_EXPORT_SENTINEL &&
+      preServiceProof.startsWith("yakfi-verified-v1:") &&
       validRestore.ok === true &&
+      validProof === preServiceProof &&
       verifiedJoined === "CREDENTIAL_MASTER_KEY,DATABASE_URL" &&
       wrongKeyRestore.ok === false &&
       wrongKeyRestore.code === "RECIPIENT_KEY_MISMATCH" &&
       tamperedMetadataRestore.ok === false &&
       tamperedMetadataRestore.code === "BUNDLE_DECRYPTION_OR_AUTH_FAILED" &&
-      disallowedKeyRejected,
+      disallowedKeyRejected &&
+      preServiceTransferRejected,
+  );
+
+  // Exclusive keygen & backup-before-transfer filesystem checks
+  const tempVaultDir = mkdtempSync(resolve(tmpdir(), "yakfi-vault-check-"));
+  let keygenExclusiveOk = false;
+  let existingFileProtected = false;
+  let liveSymlinkRefused = false;
+  let danglingSymlinkRefused = false;
+  let backupPersistedBeforePut = false;
+  let partialFailurePreservedBundle = false;
+  let networkExceptionPreservedBundle = false;
+
+  try {
+    const freshKeyPath = resolve(tempVaultDir, "owner-key.json");
+    const writtenPair = writeOwnerRecoveryKeypairExclusive(freshKeyPath);
+    const keyMode = statSync(freshKeyPath).mode & 0o777;
+    const originalKeyBytes = readFileSync(freshKeyPath, "utf8");
+    keygenExclusiveOk =
+      keyMode === 0o600 && originalKeyBytes.includes(writtenPair.recipient);
+
+    try {
+      writeOwnerRecoveryKeypairExclusive(freshKeyPath);
+    } catch (err: unknown) {
+      existingFileProtected =
+        err instanceof Error &&
+        err.message === "REFUSING_TO_OVERWRITE_EXISTING_KEYFILE" &&
+        readFileSync(freshKeyPath, "utf8") === originalKeyBytes;
+    }
+
+    const liveLinkPath = resolve(tempVaultDir, "symlink-to-existing.json");
+    symlinkSync(freshKeyPath, liveLinkPath);
+    try {
+      writeOwnerRecoveryKeypairExclusive(liveLinkPath);
+    } catch (err: unknown) {
+      liveSymlinkRefused =
+        err instanceof Error &&
+        err.message === "REFUSING_SYMLINK_KEYFILE" &&
+        readFileSync(freshKeyPath, "utf8") === originalKeyBytes;
+    }
+
+    const missingTarget = resolve(tempVaultDir, "nonexistent-target.json");
+    const danglingLinkPath = resolve(tempVaultDir, "dangling-symlink.json");
+    symlinkSync(missingTarget, danglingLinkPath);
+    try {
+      writeOwnerRecoveryKeypairExclusive(danglingLinkPath);
+    } catch (err: unknown) {
+      danglingSymlinkRefused =
+        err instanceof Error &&
+        err.message === "REFUSING_SYMLINK_KEYFILE" &&
+        !existsSync(missingTarget);
+    }
+
+    const partialBundlePath = resolve(tempVaultDir, "partial-bundle.enc.json");
+    let putCountPartial = 0;
+    let fileExistedBeforeFirstPut = false;
+    const partialRes = await transferAllowlistedSecretsToRender(
+      {
+        expectedCommitSha: exactSha,
+        actualCommitSha: exactSha,
+        serviceId: testServiceId,
+        renderApiKey: "rnd_placeholder_example_key",
+        ownerRecipient: ownerPair.recipient,
+        ownerRestorationProof: validProof,
+        bundleOutPath: partialBundlePath,
+        allowlist: ["DATABASE_URL", "CREDENTIAL_MASTER_KEY"],
+        sourceValues: {
+          DATABASE_URL: syntheticDbConn,
+          CREDENTIAL_MASTER_KEY: syntheticKeyHex,
+        },
+        dryRun: false,
+      },
+      {
+        fetchImpl: async (_input, init) => {
+          if (init?.method === "PUT") {
+            if (putCountPartial === 0) {
+              fileExistedBeforeFirstPut = existsSync(partialBundlePath);
+            }
+            putCountPartial += 1;
+            if (putCountPartial === 2) {
+              return new Response("upstream error", { status: 502 });
+            }
+            return new Response(JSON.stringify({ key: "ok" }), { status: 200 });
+          }
+          return new Response(
+            JSON.stringify({
+              service: {
+                id: testServiceId,
+                name: "yakfi-web",
+                ownerId: CONFIRMED_RENDER_WORKSPACE_ID,
+                type: "web_service",
+                serviceDetails: { region: CONFIRMED_RENDER_REGION },
+              },
+            }),
+            { status: 200 },
+          );
+        },
+      },
+    );
+    const partialSaved = JSON.parse(
+      readFileSync(partialBundlePath, "utf8"),
+    ) as typeof encryptedBundle;
+    const partialVerified = verifyOwnerEncryptedBundle({
+      bundle: partialSaved,
+      privateKey: ownerPair.privateKey,
+    });
+    backupPersistedBeforePut = fileExistedBeforeFirstPut;
+    partialFailurePreservedBundle =
+      partialRes.summary.ok === false &&
+      partialRes.summary.code === "PARTIAL_TRANSFER_FAILURE_DATABASE_URL" &&
+      partialRes.summary.encryptedBundleWritten === true &&
+      partialRes.summary.failedKey === "DATABASE_URL" &&
+      partialVerified.ok === true;
+
+    const netErrBundlePath = resolve(tempVaultDir, "neterr-bundle.enc.json");
+    let putCountNet = 0;
+    const netErrRes = await transferAllowlistedSecretsToRender(
+      {
+        expectedCommitSha: exactSha,
+        actualCommitSha: exactSha,
+        serviceId: testServiceId,
+        renderApiKey: "rnd_placeholder_example_key",
+        ownerRecipient: ownerPair.recipient,
+        ownerRestorationProof: validProof,
+        bundleOutPath: netErrBundlePath,
+        allowlist: ["DATABASE_URL", "CREDENTIAL_MASTER_KEY"],
+        sourceValues: {
+          DATABASE_URL: syntheticDbConn,
+          CREDENTIAL_MASTER_KEY: syntheticKeyHex,
+        },
+        dryRun: false,
+      },
+      {
+        fetchImpl: async (_input, init) => {
+          if (init?.method === "PUT") {
+            putCountNet += 1;
+            if (putCountNet === 2) {
+              throw new Error("ECONNRESET");
+            }
+            return new Response(JSON.stringify({ key: "ok" }), { status: 200 });
+          }
+          return new Response(
+            JSON.stringify({
+              service: {
+                id: testServiceId,
+                name: "yakfi-web",
+                ownerId: CONFIRMED_RENDER_WORKSPACE_ID,
+                type: "web_service",
+                serviceDetails: { region: CONFIRMED_RENDER_REGION },
+              },
+            }),
+            { status: 200 },
+          );
+        },
+      },
+    );
+    const netSaved = JSON.parse(
+      readFileSync(netErrBundlePath, "utf8"),
+    ) as typeof encryptedBundle;
+    const netVerified = verifyOwnerEncryptedBundle({
+      bundle: netSaved,
+      privateKey: ownerPair.privateKey,
+    });
+    networkExceptionPreservedBundle =
+      netErrRes.summary.ok === false &&
+      netErrRes.summary.code === "NETWORK_TRANSFER_FAILURE_DATABASE_URL" &&
+      netErrRes.summary.encryptedBundleWritten === true &&
+      netVerified.ok === true;
+  } finally {
+    rmSync(tempVaultDir, { recursive: true, force: true });
+  }
+
+  check(
+    "R7.3 Exclusive keygen sets 0600 mode and refuses existing files, live symlinks, and dangling symlinks",
+    keygenExclusiveOk &&
+      existingFileProtected &&
+      liveSymlinkRefused &&
+      danglingSymlinkRefused,
+  );
+
+  let missingProofBlocked = false;
+  let privateKeyInputBlocked = false;
+  const blockedPutUrls: string[] = [];
+  try {
+    await transferAllowlistedSecretsToRender(
+      {
+        expectedCommitSha: exactSha,
+        actualCommitSha: exactSha,
+        serviceId: testServiceId,
+        renderApiKey: "rnd_placeholder_example_key",
+        ownerRecipient: ownerPair.recipient,
+        allowlist: ["DATABASE_URL", "CREDENTIAL_MASTER_KEY"],
+        sourceValues: {
+          DATABASE_URL: syntheticDbConn,
+          CREDENTIAL_MASTER_KEY: syntheticKeyHex,
+        },
+        dryRun: false,
+      },
+      {
+        fetchImpl: async (input, init) => {
+          if (init?.method === "PUT") blockedPutUrls.push(String(input));
+          return new Response("{}", { status: 200 });
+        },
+      },
+    );
+  } catch (err: unknown) {
+    missingProofBlocked =
+      err instanceof Error &&
+      err.message === "OWNER_RESTORATION_VERIFICATION_REQUIRED";
+  }
+
+  try {
+    await transferAllowlistedSecretsToRender({
+      expectedCommitSha: exactSha,
+      actualCommitSha: exactSha,
+      serviceId: testServiceId,
+      renderApiKey: "rnd_placeholder_example_key",
+      ownerRecipient: ownerPair.recipient,
+      ownerRestorationProof: ownerPair.privateKey,
+      allowlist: ["DATABASE_URL", "CREDENTIAL_MASTER_KEY"],
+      sourceValues: {
+        DATABASE_URL: syntheticDbConn,
+        CREDENTIAL_MASTER_KEY: syntheticKeyHex,
+      },
+      dryRun: false,
+    });
+  } catch (err: unknown) {
+    privateKeyInputBlocked =
+      err instanceof Error && err.message === "PRIVATE_KEY_INPUT_FORBIDDEN";
+  }
+
+  check(
+    "R7.4 Real backup-before-transfer requires owner restoration proof, rejects private keys, writes bundle before PUT, and preserves ciphertext on partial/network failure",
+    missingProofBlocked &&
+      privateKeyInputBlocked &&
+      blockedPutUrls.length === 0 &&
+      backupPersistedBeforePut &&
+      partialFailurePreservedBundle &&
+      networkExceptionPreservedBundle,
   );
 
   const putUrls: string[] = [];
@@ -586,6 +893,7 @@ async function main(): Promise<void> {
       serviceId: testServiceId,
       renderApiKey: "rnd_placeholder_example_key",
       ownerRecipient: ownerPair.recipient,
+      ownerRestorationProof: validProof,
       allowlist: ["DATABASE_URL", "CREDENTIAL_MASTER_KEY"],
       sourceValues: {
         DATABASE_URL: syntheticDbConn,
@@ -617,6 +925,20 @@ async function main(): Promise<void> {
   );
 
   let wrongWorkspaceRejected = false;
+  const singleKeyBundle = encryptAllowlistedSecretsForOwner({
+    recipient: ownerPair.recipient,
+    allowlist: ["DATABASE_URL"],
+    sourceValues: { DATABASE_URL: syntheticDbConn },
+    commitSha: exactSha,
+    serviceId: "",
+  });
+  const singleKeyRestore = verifyOwnerEncryptedBundle({
+    bundle: singleKeyBundle,
+    privateKey: ownerPair.privateKey,
+  });
+  const singleKeyProof = singleKeyRestore.ok
+    ? singleKeyRestore.restorationProof
+    : "";
   try {
     await transferAllowlistedSecretsToRender(
       {
@@ -625,6 +947,7 @@ async function main(): Promise<void> {
         serviceId: testServiceId,
         renderApiKey: "rnd_placeholder_example_key",
         ownerRecipient: ownerPair.recipient,
+        ownerRestorationProof: singleKeyProof,
         allowlist: ["DATABASE_URL"],
         sourceValues: { DATABASE_URL: syntheticDbConn },
         dryRun: false,
@@ -652,7 +975,7 @@ async function main(): Promise<void> {
 
   const expectedEnvPath = `/services/${testServiceId}/env-vars/`;
   check(
-    "R7.3 Render transfer pins workspace tea-db9st3gm7kps73ek9op0 + ohio, performs zero PUTs in dryRun, and uses per-key PUTs only",
+    "R7.5 Render transfer pins workspace tea-db9st3gm7kps73ek9op0 + ohio, performs zero PUTs in dryRun, and uses per-key PUTs only",
     dryRunTransfer.summary.ok &&
       dryRunTransfer.summary.code === "DRY_RUN_READY" &&
       applyTransfer.summary.ok &&
@@ -695,7 +1018,7 @@ async function main(): Promise<void> {
   );
   const serializedInspection = JSON.stringify(inspection);
   check(
-    "R7.4 Source inspection classifies Neon hosts accurately and strips all Vercel value fields",
+    "R7.6 Source inspection classifies Neon hosts accurately and strips all Vercel value fields",
     inspection.testDbClassification === "ACTIVE_NEON_TEST_DB" &&
       inspection.prodDbClassification === "LEGACY_INACTIVE_PROD_DB" &&
       inspection.masterKeyFormatValid === true &&
@@ -703,6 +1026,106 @@ async function main(): Promise<void> {
       inspection.vercelProductionMetadata?.sensitiveCount === 1 &&
       !serializedInspection.includes("SHOULD_NEVER_BE_RETAINED") &&
       !serializedInspection.includes("flowpilot-prod.vercel.app"),
+  );
+
+  // Selected-runtime read-only decryption preflight (offline disposable fixtures)
+  const preflightKeyA = randomBytes(32);
+  const preflightKeyB = randomBytes(32);
+  const syntheticBotSecret = `${TARGET.botId}:placeholder_${"x".repeat(24)}`;
+  const wrongBotSecret = `111222333:placeholder_${"y".repeat(24)}`;
+  const fixtureConn: Connection = {
+    id: TARGET.connectionId,
+    businessId: TARGET.businessId,
+    botExternalId: TARGET.botId,
+    botUsername: TARGET.username,
+    status: "CONNECTED",
+    isActive: true,
+    deletedAt: null,
+    credentialsRef: "fp:selected-preflight-fixture",
+    credentialKind: "RUNTIME",
+    updatedAt: new Date(),
+  };
+  const fixtureCred: Credential = {
+    credentialsRef: "fp:selected-preflight-fixture",
+    businessId: TARGET.businessId,
+    algorithm: "AES-256-GCM",
+    keyVersion: 1,
+    cipherBlob: encryptCredential(preflightKeyA, syntheticBotSecret),
+  };
+
+  const healthyPreflight = await verifySelectedRuntimePreflight(
+    {
+      databaseUrl: syntheticDbConn,
+      masterKey: preflightKeyA.toString("hex"),
+    },
+    {
+      repo: {
+        readConnection: async () => fixtureConn,
+        readCredential: async () => fixtureCred,
+      },
+    },
+  );
+  const mismatchedKeyPreflight = await verifySelectedRuntimePreflight(
+    {
+      databaseUrl: syntheticDbConn,
+      masterKey: preflightKeyB.toString("hex"),
+    },
+    {
+      repo: {
+        readConnection: async () => fixtureConn,
+        readCredential: async () => fixtureCred,
+      },
+    },
+  );
+  const wrongHostPreflight = await verifySelectedRuntimePreflight(
+    {
+      databaseUrl:
+        "postgresql://user:pass@ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech/neondb?sslmode=require",
+      masterKey: preflightKeyA.toString("hex"),
+    },
+    {
+      repo: {
+        readConnection: async () => fixtureConn,
+        readCredential: async () => fixtureCred,
+      },
+    },
+  );
+  const wrongBotCredPreflight = await verifySelectedRuntimePreflight(
+    {
+      databaseUrl: syntheticDbConn,
+      masterKey: preflightKeyA.toString("hex"),
+    },
+    {
+      repo: {
+        readConnection: async () => fixtureConn,
+        readCredential: async () => ({
+          ...fixtureCred,
+          cipherBlob: encryptCredential(preflightKeyA, wrongBotSecret),
+        }),
+      },
+    },
+  );
+  const preflightOut = JSON.stringify({
+    healthyPreflight,
+    mismatchedKeyPreflight,
+    wrongHostPreflight,
+    wrongBotCredPreflight,
+  });
+  check(
+    "R7.7 verifySelectedRuntimePreflight proves real decryption, rejects mismatched key & wrong targets, and emits status only",
+    healthyPreflight.ok === true &&
+      healthyPreflight.status === "HEALTHY_LOCAL_KEY" &&
+      mismatchedKeyPreflight.ok === false &&
+      mismatchedKeyPreflight.status === "REPAIR_NEEDED" &&
+      mismatchedKeyPreflight.code === "AUTHENTICATION_FAILED_KEY_OR_DATA" &&
+      wrongHostPreflight.ok === false &&
+      wrongHostPreflight.status === "BLOCKED" &&
+      wrongHostPreflight.code === "DATABASE_TARGET_NOT_AUTHORIZED" &&
+      wrongBotCredPreflight.ok === false &&
+      wrongBotCredPreflight.status === "BLOCKED" &&
+      wrongBotCredPreflight.code === "DECRYPTED_BOT_IDENTITY_MISMATCH" &&
+      !preflightOut.includes("placeholder_") &&
+      !preflightOut.includes(preflightKeyA.toString("hex")),
   );
 
   const fixedNow = 1_763_400_000_000;
@@ -759,7 +1182,7 @@ async function main(): Promise<void> {
   );
 
   check(
-    "R7.5 Cutover gate blocks non-zero pending_update_count by default, never drops updates, and verifies HMAC signed Render readiness",
+    "R7.8 Cutover gate blocks non-zero pending_update_count by default, never drops updates, and verifies HMAC signed Render readiness",
     blockedBacklog.ok === false &&
       blockedBacklog.code === "PENDING_UPDATES_REQUIRE_DISPOSITION" &&
       blockedBacklog.pendingUpdateCount === 4 &&

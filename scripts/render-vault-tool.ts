@@ -18,18 +18,38 @@
 import {
   createCipheriv,
   createDecipheriv,
+  createHash,
+  createHmac,
   createPrivateKey,
   createPublicKey,
   diffieHellman,
   generateKeyPairSync,
   hkdfSync,
   randomBytes,
+  timingSafeEqual,
 } from "node:crypto";
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  constants,
+  fchmodSync,
+  fsyncSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import { resolveMasterKey } from "@/server/credentials/credential-crypto";
-import { validateDatabaseUrl } from "@/server/credentials/test-bot-recovery";
+import {
+  verifySelectedRuntimePreflight,
+  type SelectedRuntimePreflightResult,
+} from "@/server/credentials/selected-runtime-preflight";
+import {
+  RecoveryError,
+  validateDatabaseUrl,
+} from "@/server/credentials/test-bot-recovery";
 import {
   CUTOVER_READINESS_BOT_ID,
   CUTOVER_READINESS_BOT_USERNAME,
@@ -39,9 +59,12 @@ import {
   signCutoverReadiness,
 } from "@/server/operator/cutover-readiness";
 
+export { verifySelectedRuntimePreflight, type SelectedRuntimePreflightResult };
+
 export const CONFIRMED_RENDER_WORKSPACE_ID = "tea-db9st3gm7kps73ek9op0";
 export const CONFIRMED_RENDER_REGION = "ohio";
 export const CONFIRMED_VERCEL_PROJECT_ID = "prj_CjKh6Qt6IAKEc9EB4StaJJxnP0Fp";
+export const PRE_SERVICE_EXPORT_SENTINEL = "PRE_SERVICE_CREATION";
 
 export const EXPLICIT_TRANSFER_ALLOWLIST = [
   "DATABASE_URL",
@@ -53,6 +76,8 @@ export type AllowlistedKey = (typeof EXPLICIT_TRANSFER_ALLOWLIST)[number];
 const ALLOWLIST_SET = new Set<string>(EXPLICIT_TRANSFER_ALLOWLIST);
 const RECIPIENT_PREFIX = "yakfi-rcpt-v1:";
 const PRIVATE_KEY_PREFIX = "yakfi-priv-v1:";
+const RESTORATION_PROOF_PREFIX = "yakfi-verified-v1:";
+const RESTORATION_PROOF_DOMAIN = "yakfi-owner-restoration-proof-v1";
 const BUNDLE_SCHEMA = "yakfi.encrypted-secret-bundle@v1";
 const HKDF_INFO = Buffer.from("yakfi-render-vault-envelope-v1", "utf8");
 const FULL_SHA_RE = /^[0-9a-f]{40}$/;
@@ -111,6 +136,7 @@ export type BundleVerificationSuccess = {
   serviceId: string;
   commitSha: string;
   verifiedKeys: AllowlistedKey[];
+  restorationProof: string;
 };
 
 export type BundleVerificationFailure = {
@@ -234,8 +260,13 @@ type OwnerKeyfilePayload = {
   privateKey?: string;
 };
 
+export type BundlePersistedHook = (
+  bundle: EncryptedSecretBundle,
+) => Promise<void> | void;
+
 export type FetchDeps = {
   fetchImpl?: typeof fetch;
+  onBundlePersisted?: BundlePersistedHook;
 };
 
 export type CutoverDeps = {
@@ -256,9 +287,17 @@ export type EncryptAllowlistedParams = {
   allowlist: AllowlistedKey[];
   sourceValues: Partial<Record<AllowlistedKey, string | undefined>>;
   commitSha: string;
-  serviceId: string;
+  serviceId?: string;
   workspaceId?: string;
   now?: () => Date;
+};
+
+export type ComputeRestorationProofParams = {
+  recipient: string;
+  commitSha: string;
+  allowlist: AllowlistedKey[];
+  sourceValues: Partial<Record<AllowlistedKey, string | undefined>>;
+  workspaceId?: string;
 };
 
 export type VerifyBundleParams = {
@@ -282,6 +321,8 @@ export type TransferRenderParams = {
   allowlist: AllowlistedKey[];
   sourceValues: Partial<Record<AllowlistedKey, string | undefined>>;
   dryRun: boolean;
+  ownerRestorationProof?: string;
+  bundleOutPath?: string;
 };
 
 export type InspectSourcesParams = {
@@ -303,6 +344,20 @@ export type VerifyCutoverParams = {
   backlogPolicy?: BacklogDispositionPolicy;
 };
 
+export function assertNoPrivateKeyMaterial(raw: string | undefined): void {
+  if (!raw) {
+    return;
+  }
+  const upper = raw.toUpperCase();
+  if (
+    raw.includes(PRIVATE_KEY_PREFIX) ||
+    upper.includes("PRIVATE KEY") ||
+    upper.includes("PRIVATEKEY")
+  ) {
+    throw new Error("PRIVATE_KEY_INPUT_FORBIDDEN");
+  }
+}
+
 export function generateOwnerRecoveryKeypair(): OwnerRecoveryKeypair {
   const { publicKey, privateKey } = generateKeyPairSync("x25519");
   const spki = publicKey.export({ format: "der", type: "spki" });
@@ -315,7 +370,81 @@ export function generateOwnerRecoveryKeypair(): OwnerRecoveryKeypair {
   };
 }
 
+export function writeOwnerRecoveryKeypairExclusive(
+  outPath: string,
+  providedPair?: OwnerRecoveryKeypair,
+): OwnerRecoveryKeypair {
+  const trimmedPath = outPath.trim();
+  if (!trimmedPath) {
+    throw new Error("INVALID_KEYFILE_PATH");
+  }
+  const existingStat = lstatSync(trimmedPath, { throwIfNoEntry: false });
+  if (existingStat) {
+    if (existingStat.isSymbolicLink()) {
+      throw new Error("REFUSING_SYMLINK_KEYFILE");
+    }
+    throw new Error("REFUSING_TO_OVERWRITE_EXISTING_KEYFILE");
+  }
+
+  const pair = providedPair ?? generateOwnerRecoveryKeypair();
+  const warnMsg =
+    "STORE ONLY IN ENCRYPTED VAULT. NEVER COMMIT OR SHARE privateKey.";
+  const keypairPayload = {
+    schema: "yakfi.owner-recovery-keypair@v1",
+    createdAt: new Date().toISOString(),
+    recipient: pair.recipient,
+    privateKey: pair.privateKey,
+    warning: warnMsg,
+  };
+  const keypairJson = `${JSON.stringify(keypairPayload, null, 2)}\n`;
+
+  const noFollow = constants.O_NOFOLLOW ?? 0;
+  const openFlags =
+    constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | noFollow;
+
+  let fd: number;
+  try {
+    fd = openSync(trimmedPath, openFlags, 0o600);
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "ELOOP") {
+      throw new Error("REFUSING_SYMLINK_KEYFILE");
+    }
+    if (code === "EEXIST") {
+      throw new Error("REFUSING_TO_OVERWRITE_EXISTING_KEYFILE");
+    }
+    throw new Error("KEYFILE_EXCLUSIVE_WRITE_FAILED");
+  }
+
+  try {
+    fchmodSync(fd, 0o600);
+    writeFileSync(fd, keypairJson, "utf8");
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+
+  return pair;
+}
+
+export function writeEncryptedBundleFile(
+  outPath: string,
+  bundle: EncryptedSecretBundle,
+): void {
+  const trimmedPath = outPath.trim();
+  if (!trimmedPath) {
+    throw new Error("MISSING_BUNDLE_OUT_PATH");
+  }
+  const existingStat = lstatSync(trimmedPath, { throwIfNoEntry: false });
+  if (existingStat?.isSymbolicLink()) {
+    throw new Error("REFUSING_SYMLINK_BUNDLE_PATH");
+  }
+  const outJson = `${JSON.stringify(bundle, null, 2)}\n`;
+  writeFileSync(trimmedPath, outJson, { mode: 0o600 });
+}
+
 function parseRecipientPublicKey(recipient: string) {
+  assertNoPrivateKeyMaterial(recipient);
   const trimmed = recipient.trim();
   if (!trimmed.startsWith(RECIPIENT_PREFIX)) {
     throw new Error("INVALID_OWNER_RECIPIENT");
@@ -415,6 +544,66 @@ function buildBundleAad(params: BuildBundleAadParams): Buffer {
   return Buffer.from(aadJson, "utf8");
 }
 
+export function computeOwnerRestorationProof(
+  params: ComputeRestorationProofParams,
+): string {
+  assertNoPrivateKeyMaterial(params.recipient);
+  const commitSha = params.commitSha.trim().toLowerCase();
+  if (!FULL_SHA_RE.test(commitSha)) {
+    throw new Error("INVALID_COMMIT_SHA");
+  }
+  const rawWorkspace = params.workspaceId ?? CONFIRMED_RENDER_WORKSPACE_ID;
+  const workspaceId = rawWorkspace.trim();
+  if (workspaceId !== CONFIRMED_RENDER_WORKSPACE_ID) {
+    throw new Error("WORKSPACE_ID_MISMATCH");
+  }
+  if (params.allowlist.length === 0) {
+    throw new Error("EMPTY_ALLOWLIST");
+  }
+  const sortedKeys = [...params.allowlist].sort();
+  for (const key of sortedKeys) {
+    if (!ALLOWLIST_SET.has(key)) {
+      throw new Error("DISALLOWED_SECRET_KEY");
+    }
+  }
+  const parsedRecipient = parseRecipientPublicKey(params.recipient);
+  const valueDigests: Array<[AllowlistedKey, string]> = [];
+  for (const key of sortedKeys) {
+    const validVal = validateAllowlistedValue(key, params.sourceValues[key]);
+    const hasher = createHash("sha256");
+    const valHash = hasher.update(validVal, "utf8").digest("hex");
+    valueDigests.push([key, valHash]);
+  }
+  const canonical = JSON.stringify({
+    schema: RESTORATION_PROOF_DOMAIN,
+    recipient: parsedRecipient.normalizedRecipient,
+    workspaceId,
+    commitSha,
+    keyNames: sortedKeys,
+    valueDigests,
+  });
+  const hmac = createHmac("sha256", RESTORATION_PROOF_DOMAIN);
+  const mac = hmac.update(canonical, "utf8").digest("base64url");
+  return `${RESTORATION_PROOF_PREFIX}${mac}`;
+}
+
+export function verifyOwnerRestorationProof(
+  expectedProof: string,
+  providedProof: string | undefined,
+): boolean {
+  assertNoPrivateKeyMaterial(providedProof);
+  const trimmed = providedProof?.trim() ?? "";
+  if (!trimmed.startsWith(RESTORATION_PROOF_PREFIX)) {
+    return false;
+  }
+  const expectedBuf = Buffer.from(expectedProof, "utf8");
+  const providedBuf = Buffer.from(trimmed, "utf8");
+  if (expectedBuf.length !== providedBuf.length) {
+    return false;
+  }
+  return timingSafeEqual(expectedBuf, providedBuf);
+}
+
 export function encryptAllowlistedSecretsForOwner(
   params: EncryptAllowlistedParams,
 ): EncryptedSecretBundle {
@@ -422,8 +611,11 @@ export function encryptAllowlistedSecretsForOwner(
   if (!FULL_SHA_RE.test(commitSha)) {
     throw new Error("INVALID_COMMIT_SHA");
   }
-  const serviceId = params.serviceId.trim();
-  if (!RENDER_SERVICE_ID_RE.test(serviceId)) {
+  const rawServiceId = params.serviceId?.trim() ?? "";
+  const serviceId =
+    rawServiceId === "" ? PRE_SERVICE_EXPORT_SENTINEL : rawServiceId;
+  const validPreService = serviceId === PRE_SERVICE_EXPORT_SENTINEL;
+  if (!validPreService && !RENDER_SERVICE_ID_RE.test(serviceId)) {
     throw new Error("INVALID_RENDER_SERVICE_ID");
   }
   const rawWorkspace = params.workspaceId ?? CONFIRMED_RENDER_WORKSPACE_ID;
@@ -514,7 +706,11 @@ function decryptBundleToMap(
   if (bundle.metadata.workspaceId !== CONFIRMED_RENDER_WORKSPACE_ID) {
     throw new Error("WORKSPACE_ID_MISMATCH");
   }
-  if (!RENDER_SERVICE_ID_RE.test(bundle.metadata.serviceId)) {
+  const metaServiceId = bundle.metadata.serviceId;
+  if (
+    metaServiceId !== PRE_SERVICE_EXPORT_SENTINEL &&
+    !RENDER_SERVICE_ID_RE.test(metaServiceId)
+  ) {
     throw new Error("INVALID_RENDER_SERVICE_ID");
   }
   if (!FULL_SHA_RE.test(bundle.metadata.commitSha)) {
@@ -610,12 +806,20 @@ export function verifyOwnerEncryptedBundle(
   try {
     const recovered = decryptBundleToMap(params.bundle, params.privateKey);
     const verifiedKeys = (Object.keys(recovered) as AllowlistedKey[]).sort();
+    const restorationProof = computeOwnerRestorationProof({
+      recipient: params.bundle.recipient,
+      workspaceId: params.bundle.metadata.workspaceId,
+      commitSha: params.bundle.metadata.commitSha,
+      allowlist: verifiedKeys,
+      sourceValues: recovered,
+    });
     return {
       ok: true,
       workspaceId: params.bundle.metadata.workspaceId,
       serviceId: params.bundle.metadata.serviceId,
       commitSha: params.bundle.metadata.commitSha,
       verifiedKeys,
+      restorationProof,
     };
   } catch (err: unknown) {
     let code = "BUNDLE_VERIFICATION_FAILED";
@@ -700,10 +904,28 @@ export async function transferAllowlistedSecretsToRender(
   params: TransferRenderParams,
   deps: FetchDeps = {},
 ): Promise<TransferRenderResult> {
+  assertNoPrivateKeyMaterial(params.ownerRecipient);
+  assertNoPrivateKeyMaterial(params.ownerRestorationProof);
+
   const expectedSha = params.expectedCommitSha.trim().toLowerCase();
   const actualSha = params.actualCommitSha.trim().toLowerCase();
   if (!FULL_SHA_RE.test(expectedSha) || expectedSha !== actualSha) {
     throw new Error("COMMIT_SHA_MISMATCH");
+  }
+
+  const expectedProof = computeOwnerRestorationProof({
+    recipient: params.ownerRecipient,
+    workspaceId: CONFIRMED_RENDER_WORKSPACE_ID,
+    commitSha: expectedSha,
+    allowlist: params.allowlist,
+    sourceValues: params.sourceValues,
+  });
+
+  const providedProof = params.ownerRestorationProof?.trim() ?? "";
+  if (!params.dryRun || providedProof.length > 0) {
+    if (!verifyOwnerRestorationProof(expectedProof, providedProof)) {
+      throw new Error("OWNER_RESTORATION_VERIFICATION_REQUIRED");
+    }
   }
 
   const ownershipReq: VerifyRenderServiceParams = {
@@ -721,6 +943,17 @@ export async function transferAllowlistedSecretsToRender(
     workspaceId: serviceInfo.workspaceId,
   });
 
+  // Persist and deliver the encrypted recovery bundle BEFORE any remote PUT.
+  let encryptedBundleWritten = false;
+  if (params.bundleOutPath) {
+    writeEncryptedBundleFile(params.bundleOutPath, encryptedBundle);
+    encryptedBundleWritten = true;
+  }
+  if (deps.onBundlePersisted) {
+    await deps.onBundlePersisted(encryptedBundle);
+    encryptedBundleWritten = true;
+  }
+
   const sortedKeys = [...encryptedBundle.metadata.keyNames];
 
   if (params.dryRun) {
@@ -735,6 +968,7 @@ export async function transferAllowlistedSecretsToRender(
         commitSha: expectedSha,
         dryRun: true,
         transferredKeys: sortedKeys,
+        encryptedBundleWritten,
       },
     };
   }
@@ -749,17 +983,36 @@ export async function transferAllowlistedSecretsToRender(
     const encodedKey = encodeURIComponent(key);
     const svcBase = `https://api.render.com/v1/services/${encodedSvc}`;
     const putUrl = `${svcBase}/env-vars/${encodedKey}`;
-    const res = await fetchImpl(putUrl, {
-      method: "PUT",
-      headers: {
-        Authorization: `Bearer ${apiCred}`,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ value: val }),
-      redirect: "error",
-      signal: AbortSignal.timeout(15_000),
-    });
+    let res: Response;
+    try {
+      res = await fetchImpl(putUrl, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${apiCred}`,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ value: val }),
+        redirect: "error",
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch {
+      return {
+        encryptedBundle,
+        summary: {
+          ok: false,
+          mode: "transfer-to-render",
+          code: `NETWORK_TRANSFER_FAILURE_${key}`,
+          workspaceId: serviceInfo.workspaceId,
+          serviceId: serviceInfo.serviceId,
+          commitSha: expectedSha,
+          dryRun: false,
+          transferredKeys: completed,
+          failedKey: key,
+          encryptedBundleWritten,
+        },
+      };
+    }
     if (!res.ok) {
       return {
         encryptedBundle,
@@ -773,6 +1026,7 @@ export async function transferAllowlistedSecretsToRender(
           dryRun: false,
           transferredKeys: completed,
           failedKey: key,
+          encryptedBundleWritten,
         },
       };
     }
@@ -790,6 +1044,7 @@ export async function transferAllowlistedSecretsToRender(
       commitSha: expectedSha,
       dryRun: false,
       transferredKeys: completed,
+      encryptedBundleWritten,
     },
   };
 }
@@ -1028,18 +1283,7 @@ async function runCli(): Promise<void> {
       console.error(u);
       process.exit(1);
     }
-    const pair = generateOwnerRecoveryKeypair();
-    const warnMsg =
-      "STORE ONLY IN ENCRYPTED VAULT. NEVER COMMIT OR SHARE privateKey.";
-    const keypairPayload = {
-      schema: "yakfi.owner-recovery-keypair@v1",
-      createdAt: new Date().toISOString(),
-      recipient: pair.recipient,
-      privateKey: pair.privateKey,
-      warning: warnMsg,
-    };
-    const keypairJson = `${JSON.stringify(keypairPayload, null, 2)}\n`;
-    writeFileSync(outPath, keypairJson, { mode: 0o600 });
+    const pair = writeOwnerRecoveryKeypairExclusive(outPath);
     console.log(`✅ Wrote owner recovery keypair (0600) to: ${outPath}`);
     console.log("📌 Public recipient (safe for workflow input):");
     console.log(`   ${pair.recipient}`);
@@ -1067,10 +1311,61 @@ async function runCli(): Promise<void> {
       process.exit(1);
     }
     console.log("✅ RESTORATION_CHECK_PASSED (values-free):");
-    console.log(`   - workspaceId: ${result.workspaceId}`);
-    console.log(`   - serviceId:   ${result.serviceId}`);
-    console.log(`   - commitSha:   ${result.commitSha}`);
-    console.log(`   - verifiedKeys: ${result.verifiedKeys.join(", ")}`);
+    console.log(`   - workspaceId:      ${result.workspaceId}`);
+    console.log(`   - serviceId:        ${result.serviceId}`);
+    console.log(`   - commitSha:        ${result.commitSha}`);
+    console.log(`   - verifiedKeys:     ${result.verifiedKeys.join(", ")}`);
+    console.log(`   - restorationProof: ${result.restorationProof}`);
+    return;
+  }
+
+  if (subcommand === "verify-selected-runtime") {
+    const rawExpected = process.env.EXPECTED_COMMIT_SHA ?? "";
+    const expectedSha = rawExpected.trim().toLowerCase();
+    const rawActual = process.env.GITHUB_SHA ?? "";
+    const actualSha = rawActual.trim().toLowerCase();
+    if (expectedSha) {
+      if (!FULL_SHA_RE.test(expectedSha) || expectedSha !== actualSha) {
+        throw new Error("COMMIT_SHA_MISMATCH");
+      }
+    }
+    const rawDbUrl = process.env.TEST_DATABASE_URL_SOURCE?.trim() ?? "";
+    const rawMasterKey = process.env.CREDENTIAL_MASTER_KEY_SOURCE?.trim() ?? "";
+    try {
+      validateDatabaseUrl(rawDbUrl);
+    } catch (err: unknown) {
+      const errCode =
+        err instanceof RecoveryError
+          ? err.code
+          : "DATABASE_TARGET_NOT_AUTHORIZED";
+      writeSummaryLine("### Selected Runtime Pairing Preflight (Read-Only)");
+      writeSummaryLine("- **Status**: `BLOCKED`");
+      writeSummaryLine(`- **Code**: \`${errCode}\``);
+      console.log("status: BLOCKED");
+      console.log(`code: ${errCode}`);
+      process.exit(1);
+    }
+    process.env.DATABASE_URL = rawDbUrl;
+    const dbMod = await import("@/server/db");
+    const repoMod =
+      await import("@/server/repositories/test-bot-recovery.repository");
+    let preflight: SelectedRuntimePreflightResult;
+    try {
+      preflight = await verifySelectedRuntimePreflight(
+        { databaseUrl: rawDbUrl, masterKey: rawMasterKey },
+        { repo: repoMod.testBotRecoveryRepository(dbMod.db) },
+      );
+    } finally {
+      await dbMod.db.$disconnect().catch(() => {});
+    }
+    writeSummaryLine("### Selected Runtime Pairing Preflight (Read-Only)");
+    writeSummaryLine(`- **Status**: \`${preflight.status}\``);
+    writeSummaryLine(`- **Code**: \`${preflight.code}\``);
+    console.log(`status: ${preflight.status}`);
+    console.log(`code: ${preflight.code}`);
+    if (!preflight.ok) {
+      process.exit(1);
+    }
     return;
   }
 
@@ -1133,8 +1428,7 @@ async function runCli(): Promise<void> {
       commitSha: expectedSha,
       serviceId: process.env.RENDER_SERVICE_ID ?? "",
     });
-    const outJson = `${JSON.stringify(bundle, null, 2)}\n`;
-    writeFileSync(bundleOut, outJson, { mode: 0o600 });
+    writeEncryptedBundleFile(bundleOut, bundle);
     const joinedAllowlist = bundle.metadata.keyNames.join(", ");
     writeSummaryLine("### Encrypted Owner Bundle Created (Zero Plaintext)");
     writeSummaryLine(`- **Workspace**: \`${bundle.metadata.workspaceId}\``);
@@ -1154,6 +1448,8 @@ async function runCli(): Promise<void> {
       serviceId: process.env.RENDER_SERVICE_ID ?? "",
       renderApiKey: process.env.RENDER_API_KEY_SOURCE ?? "",
       ownerRecipient: process.env.OWNER_RECIPIENT ?? "",
+      ownerRestorationProof: process.env.OWNER_RESTORATION_PROOF ?? "",
+      bundleOutPath: bundleOut,
       allowlist,
       sourceValues: {
         DATABASE_URL: process.env.TEST_DATABASE_URL_SOURCE,
@@ -1161,11 +1457,7 @@ async function runCli(): Promise<void> {
       },
       dryRun,
     });
-    const { summary, encryptedBundle } = transferResult;
-    if (bundleOut) {
-      const jsonOut = `${JSON.stringify(encryptedBundle, null, 2)}\n`;
-      writeFileSync(bundleOut, jsonOut, { mode: 0o600 });
-    }
+    const { summary } = transferResult;
     const processed = (summary.transferredKeys ?? []).join(", ");
     writeSummaryLine("### Render Allowlisted Secret Transfer Summary");
     writeSummaryLine(`- **Outcome**: \`${summary.code}\``);

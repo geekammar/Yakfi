@@ -37,9 +37,12 @@ import { pathToFileURL } from "node:url";
 
 import { auth } from "@/lib/auth";
 import { PostgresRuntimeCredentialStore } from "@/server/credentials/runtime-credential-store";
+import { verifySelectedRuntimePreflight } from "@/server/credentials/selected-runtime-preflight";
+import { TARGET } from "@/server/credentials/test-bot-recovery";
 import { db } from "@/server/db";
 import { hashTelegramWebhookSecret } from "@/server/integrations/telegram/telegram-webhook";
 import { runtimeCredentialRepository } from "@/server/repositories";
+import { testBotRecoveryRepository } from "@/server/repositories/test-bot-recovery.repository";
 
 import pkg from "../package.json";
 import { pollProductionReleaseReadiness } from "./verify-production-release.mjs";
@@ -710,6 +713,130 @@ async function main(): Promise<void> {
     } else {
       await db.platformAiPolicy
         .deleteMany({ where: { id: "singleton" } })
+        .catch(() => {});
+    }
+  }
+
+  // ─── Phase 3: Real Disposable-DB verify-selected-runtime Preflight ────────
+  const keyGoodHex = randomBytes(32).toString("hex");
+  const keyWrongHex = randomBytes(32).toString("hex");
+  const preflightCredRef = `fp:disposable-selected-${randomUUID()}`;
+  const botRandHex = randomBytes(14).toString("hex");
+  const preflightBotSecret = `${TARGET.botId}:placeholder_${botRandHex}`;
+  let createdTargetBiz = false;
+
+  try {
+    const existingTargetBiz = await db.business.findUnique({
+      where: { id: TARGET.businessId },
+    });
+    if (!existingTargetBiz) {
+      await db.business.create({
+        data: {
+          id: TARGET.businessId,
+          name: "منشأة فحص التوافق المختارة",
+          whatsappNumber: `+96658${String(Date.now()).slice(-7)}`,
+          timezone: "Asia/Riyadh",
+        },
+      });
+      createdTargetBiz = true;
+    }
+
+    const preflightStore = new PostgresRuntimeCredentialStore({
+      repository: runtimeCredentialRepository,
+      masterKey: keyGoodHex,
+    });
+    const storedPreflight = await preflightStore.store({
+      businessId: TARGET.businessId,
+      reference: preflightCredRef,
+      secret: preflightBotSecret,
+    });
+    if (!storedPreflight.ok) {
+      throw new Error(
+        `Preflight fixture store failed: ${storedPreflight.code}`,
+      );
+    }
+
+    await db.telegramConnection.create({
+      data: {
+        id: TARGET.connectionId,
+        businessId: TARGET.businessId,
+        displayName: "Selected Runtime Fixture Bot",
+        botExternalId: TARGET.botId,
+        botUsername: TARGET.username,
+        provider: "telegram_managed",
+        status: "CONNECTED",
+        isActive: true,
+        credentialsRef: preflightCredRef,
+        credentialKind: "RUNTIME",
+      },
+    });
+
+    const realReadonlyRepo = testBotRecoveryRepository(db);
+    const okPreflight = await verifySelectedRuntimePreflight(
+      { databaseUrl: dbUrl!, masterKey: keyGoodHex },
+      { repo: realReadonlyRepo, allowLocalDisposableDbForTests: true },
+    );
+    const mismatchPreflight = await verifySelectedRuntimePreflight(
+      { databaseUrl: dbUrl!, masterKey: keyWrongHex },
+      { repo: realReadonlyRepo, allowLocalDisposableDbForTests: true },
+    );
+    const wrongDbTargetPreflight = await verifySelectedRuntimePreflight(
+      {
+        databaseUrl:
+          "postgresql://user:pass@ep-tiny-grass-a5e63jev.us-east-2.aws.neon.tech/neondb?sslmode=require",
+        masterKey: keyGoodHex,
+      },
+      { repo: realReadonlyRepo },
+    );
+
+    await db.telegramConnection.update({
+      where: { id: TARGET.connectionId },
+      data: { botExternalId: "1010101010" },
+    });
+    const wrongConnTargetPreflight = await verifySelectedRuntimePreflight(
+      { databaseUrl: dbUrl!, masterKey: keyGoodHex },
+      { repo: realReadonlyRepo, allowLocalDisposableDbForTests: true },
+    );
+
+    const serializedPreflight = JSON.stringify({
+      okPreflight,
+      mismatchPreflight,
+      wrongDbTargetPreflight,
+      wrongConnTargetPreflight,
+    });
+
+    check(
+      "DB8. Real disposable-DB verify-selected-runtime preflight proves decryption, rejects wrong key/target, and leaks zero secrets",
+      okPreflight.ok === true &&
+        okPreflight.status === "HEALTHY_LOCAL_KEY" &&
+        mismatchPreflight.ok === false &&
+        mismatchPreflight.status === "REPAIR_NEEDED" &&
+        mismatchPreflight.code === "AUTHENTICATION_FAILED_KEY_OR_DATA" &&
+        wrongDbTargetPreflight.ok === false &&
+        wrongDbTargetPreflight.status === "BLOCKED" &&
+        wrongDbTargetPreflight.code === "DATABASE_TARGET_NOT_AUTHORIZED" &&
+        wrongConnTargetPreflight.ok === false &&
+        wrongConnTargetPreflight.status === "BLOCKED" &&
+        wrongConnTargetPreflight.code === "CONNECTION_IDENTITY_MISMATCH" &&
+        !serializedPreflight.includes(preflightBotSecret) &&
+        !serializedPreflight.includes(keyGoodHex),
+      {
+        okPreflight,
+        mismatchPreflight,
+        wrongDbTargetPreflight,
+        wrongConnTargetPreflight,
+      },
+    );
+  } finally {
+    await db.telegramConnection
+      .deleteMany({ where: { id: TARGET.connectionId } })
+      .catch(() => {});
+    await db.runtimeCredential
+      .deleteMany({ where: { credentialsRef: preflightCredRef } })
+      .catch(() => {});
+    if (createdTargetBiz) {
+      await db.business
+        .deleteMany({ where: { id: TARGET.businessId } })
         .catch(() => {});
     }
     await db.$disconnect().catch(() => {});

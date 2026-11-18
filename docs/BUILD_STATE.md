@@ -38,7 +38,16 @@
   `webhookBody.success` contract check, and `Request`-preserving preload
   fetch). Verified on the new Boxd VPS that old VPS local files, `rclone`, and
   Agent Handoff did not survive, `RENDER_API_KEY` is absent from GitHub
-  secrets, and zero encrypted bundles have been exported yet. `512 MB` live
+  secrets, and zero encrypted bundles have been exported yet. Added focused
+  recovery/transfer hardening: pre-service `export-encrypted-bundle`
+  (`PRE_SERVICE_CREATION` while keeping strict `srv-...`/workspace checks for
+  transfer), exclusive `0600` `keygen` refusing existing files and symlinks,
+  two-job backup-before-transfer delivering ciphertext before remote `PUT`s with
+  required values-free `owner_restoration_proof`, private-key CI ban, and
+  `always()` artifact preservation across partial/network failures, plus
+  read-only zero-Telegram `verify-selected-runtime` decryption preflight tested
+  against disposable fixtures (`check:render-migration` +
+  `check:render-runtime-db`). `512 MB` live
   capacity, Render credit details, and live deployment remain unexecuted owner
   actions.
 

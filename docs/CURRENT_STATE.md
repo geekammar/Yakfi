@@ -21,9 +21,12 @@
   separates zero-DB `/api/health/live` from HTTP `200`/`503` `/api/health` DB
   readiness; requires explicit target + exact 40-char SHA in
   `production-release.yml`; adds values-free `config/render-env-inventory.json`,
-  manual owner-encrypted X25519/GCM secret recovery + restoration check
-  (`render-migration-ops.yml` / `scripts/render-vault-tool.ts`), and the ordered
-  cutover runbook (`docs/VERCEL_DEPLOYMENT.md` §7).
+  manual owner-encrypted X25519/GCM pre-service secret recovery, exclusive
+  `0600` keygen, read-only DB-decryption `verify-selected-runtime` preflight,
+  two-job backup-before-transfer with required `owner_restoration_proof` and
+  `always()` ciphertext preservation (`render-migration-ops.yml` /
+  `scripts/render-vault-tool.ts`), and the ordered cutover runbook
+  (`docs/VERCEL_DEPLOYMENT.md` §7).
 - **Still open / owner-gated:** Render $50 credit balance/expiry/exhaustion
   dashboard check, `512 MB` live RAM measurement, owner recovery keypair +
   vault backup (on Ammar's workstation; old deleted VPS local files, `rclone`,

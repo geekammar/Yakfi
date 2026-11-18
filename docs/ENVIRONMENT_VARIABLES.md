@@ -518,34 +518,48 @@ Prepared in `.github/workflows/render-migration-ops.yml` +
 `scripts/render-vault-tool.ts` (`workflow_dispatch` only; **never** runs in PR
 CI; **not** executed in this preparation task):
 
-1. **Owner keypair generation (Ammar's private workstation only):**
+1. **Exclusive owner keypair generation (Ammar's private workstation only):**
    ```bash
    pnpm exec tsx scripts/render-vault-tool.ts keygen --out ~/yakfi-owner-recovery-key.json
    ```
-   Save `~/yakfi-owner-recovery-key.json` (`0600`) inside Ammar's encrypted
-   password manager vault; copy only the public `yakfi-rcpt-v1:...` recipient.
-2. **Read-only source & metadata inspection (`mode=inspect-sources`):**
-   classifies `TEST_DATABASE_URL` / `PRODUCTION_DATABASE_URL` Neon hosts, checks
-   32-byte `CREDENTIAL_MASTER_KEY` decoding, verifies Render service ownership
-   (`My Workspace` / `tea-db9st3gm7kps73ek9op0` / `ohio`), and lists Vercel
-   Production variable names/types (`?decrypt=false` with `value` stripped).
-3. **Encrypted export (`mode=export-encrypted-bundle`) & Restoration Check:**
-   encrypts only the explicit allowlist (`DATABASE_URL`,
-   `CREDENTIAL_MASTER_KEY`) in memory to `owner_recipient` using ephemeral
-   X25519 ECDH + HKDF-SHA256 + AES-256-GCM (AAD-bound to workspace, service ID,
-   exact 40-char SHA, and key names) and uploads ciphertext-only
-   `yakfi-owner-encrypted-bundle` (1-day retention). Ammar verifies restoration
-   locally without printing plaintext:
+   Uses exclusive `O_CREAT | O_EXCL` (`0600`) creation and refuses existing
+   files or symlinks so an existing private key can never be overwritten. Save
+   `~/yakfi-owner-recovery-key.json` inside Ammar's encrypted password manager
+   vault; copy only the public `yakfi-rcpt-v1:...` recipient (any private key
+   material passed to CI is rejected with `PRIVATE_KEY_INPUT_FORBIDDEN`).
+2. **Read-only decryption preflight (`mode=verify-selected-runtime`) & metadata inspection (`mode=inspect-sources`):**
+   `verify-selected-runtime` proves read-only AES-256-GCM decryption of the
+   intended existing `fp:<id>` credential in the active Neon dataset
+   (`status: HEALTHY_LOCAL_KEY`) with zero Telegram/AI calls and zero secret
+   values in output, plus read-only `prisma migrate status`. `inspect-sources`
+   classifies Neon hosts, checks 32-byte key decoding, optionally verifies
+   Render service ownership (`tea-db9st3gm7kps73ek9op0` / `ohio`), and lists
+   Vercel Production variable names/types (`?decrypt=false` with `value`
+   stripped).
+3. **Pre-service encrypted export (`mode=export-encrypted-bundle`) & Restoration Proof:**
+   works before any Render service exists (`render_service_id` blank ->
+   `PRE_SERVICE_CREATION`), runs `verify-selected-runtime` first, encrypts only
+   the explicit allowlist (`DATABASE_URL`, `CREDENTIAL_MASTER_KEY`) in memory to
+   `owner_recipient` using ephemeral X25519 ECDH + HKDF-SHA256 + AES-256-GCM,
+   and uploads ciphertext-only `yakfi-owner-encrypted-bundle` (`if: always()`,
+   1-day retention). Ammar verifies restoration locally without printing
+   plaintext and obtains the values-free one-way `restorationProof`
+   (`yakfi-verified-v1:...`):
    ```bash
    pnpm exec tsx scripts/render-vault-tool.ts verify-bundle \
      --bundle yakfi-secrets.enc.json \
      --key-file ~/yakfi-owner-recovery-key.json
    ```
-4. **Allowlisted Render transfer (`mode=transfer-to-render`):** requires exact
-   40-char SHA, confirmed `tea-db9st3gm7kps73ek9op0` workspace + `ohio`
-   `web_service`, `dry_run=true` preflight before `dry_run=false` apply, and
-   uses single-key `PUT /v1/services/{serviceId}/env-vars/{key}` (never bulk
-   replace, never auto-deploy).
+4. **Backup-before-transfer (`mode=transfer-to-render`):** requires exact
+   40-char SHA, confirmed real `srv-...` in `tea-db9st3gm7kps73ek9op0` + `ohio`
+   `web_service` (`PRE_SERVICE_CREATION` rejected), and verified
+   `owner_restoration_proof` (`yakfi-verified-v1:...`) when `dry_run=false`. Job
+   1 (`prepare-and-deliver-backup`) verifies pairing + proof and delivers
+   `yakfi-owner-encrypted-bundle` to GitHub Artifacts **before** Job 2
+   (`apply-render-transfer`) issues single-key
+   `PUT /v1/services/{serviceId}/env-vars/{key}` calls, and `always()` artifact
+   upload + pre-PUT disk persistence preserve ciphertext across partial HTTP
+   failures and network exceptions.
 
 ### Selective Re-Linking Contingency (If Recovery Fails)
 

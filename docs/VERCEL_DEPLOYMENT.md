@@ -363,24 +363,30 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
 
 ### 7.5 Concrete Ordered Cutover Runbook
 
-1. **Owner Vault & Recovery Proof (before touching Render secrets):**
+1. **Owner Vault & Pre-Service Recovery Proof (before creating or touching Render):**
    - On Ammar's private workstation (never on the VPS or chat), generate the
-     owner X25519 recovery keypair and save the private key in the encrypted
-     password manager vault:
+     owner X25519 recovery keypair exclusively (`0600`; refuses existing files
+     or symlinks so an existing private key is never overwritten) and save it in
+     the encrypted password manager vault:
      `pnpm exec tsx scripts/render-vault-tool.ts keygen --out ~/yakfi-owner-recovery-key.json`
-   - Run read-only `verify-selected-runtime` (`test-db-migrate.yml`) on the
-     merged `main` SHA to confirm `status: HEALTHY_LOCAL_KEY` and read-only
-     `prisma migrate status` on `ep-little-mouse-a5nh644n.../neondb`.
-   - Dispatch `.github/workflows/render-migration-ops.yml` (`inspect-sources`,
-     then `export-encrypted-bundle` with `owner_recipient=yakfi-rcpt-v1:...`),
-     download `yakfi-owner-encrypted-bundle`, and run the local restoration
-     check:
+   - Dispatch `.github/workflows/render-migration-ops.yml` with
+     `mode=verify-selected-runtime` on the exact reviewed 40-char SHA (proves
+     read-only AES-256-GCM decryption of the existing `fp:<id>` credential in
+     `ep-little-mouse-a5nh644n.../neondb` -> `status: HEALTHY_LOCAL_KEY` with
+     zero Telegram calls, plus read-only `prisma migrate status`), and
+     `mode=inspect-sources` for values-free metadata.
+   - Dispatch `mode=export-encrypted-bundle` with
+     `owner_recipient=yakfi-rcpt-v1:...` and `render_service_id` left blank
+     (`PRE_SERVICE_CREATION` — works before any Render service exists), download
+     `yakfi-owner-encrypted-bundle`, and run the local restoration check:
      `pnpm exec tsx scripts/render-vault-tool.ts verify-bundle --bundle yakfi-secrets.enc.json --key-file ~/yakfi-owner-recovery-key.json`
+     Record the values-free `restorationProof` (`yakfi-verified-v1:...`) printed
+     by `verify-bundle` (never upload the private key to CI).
    - Store any newly created values (`BETTER_AUTH_SECRET`, dedicated
      `OPENROUTER_API_KEY`) in the owner vault **before** entering them into
      Render. Render alone is never treated as the backup.
 2. **Create Service & Pin Exact URLs Before Final Build:**
-   - Create the single `yakfi-web` Starter service in `My Workspace`
+   - Create the single `yakfi-web` Starter service (`srv-...`) in `My Workspace`
      (`tea-db9st3gm7kps73ek9op0`), region `ohio`, `autoDeployTrigger: off`.
    - Confirm the exact assigned HTTPS origin (e.g.
      `https://yakfi-web.onrender.com`). Set both `NEXT_PUBLIC_APP_URL` and
@@ -388,7 +394,10 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
      `BETTER_AUTH_SECRET` and `OPENROUTER_API_KEY` from the vault, and transfer
      allowlisted `DATABASE_URL` + `CREDENTIAL_MASTER_KEY` (via owner vault or
      reviewed `render-migration-ops.yml` `transfer-to-render` with
-     `dry_run=true` then `dry_run=false`).
+     `render_service_id=srv-...` and `owner_restoration_proof=yakfi-verified-v1:...`,
+     `dry_run=true` first then `dry_run=false`; Job 1 delivers the encrypted
+     backup artifact before Job 2 mutates Render, and `always()` upload
+     preserves ciphertext even on partial or network failure).
    - Trigger a clean Render build + deploy of the exact merged `main` SHA
      **after** `NEXT_PUBLIC_APP_URL` is set so client bundles inline the true
      origin.
