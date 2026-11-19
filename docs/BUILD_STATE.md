@@ -26,8 +26,17 @@
   `allowed_updates: ["message","callback_query"]`; it never enables
   `drop_pending_updates`, treats a genuinely exact already-at-destination as a
   zero-write no-op, and returns truthful partial/ambiguous failures without
-  blind retry. When exact `allowedUpdates` is supplied, post-apply verifies the
-  Telegram-observed set exactly and rejects extra/missing/malformed sets.
+  blind retry. Raw `allowed_updates` is validated before normalization:
+  missing, non-array, null, mixed-type or empty-string observations block
+  preflight as `OBSERVED_ALLOWED_UPDATES_MALFORMED` and cannot be exact; with
+  explicit `allowedUpdates`, the switch rejects them as
+  `MALFORMED_ALLOWED_UPDATES` before mutation. When exact `allowedUpdates` is
+  supplied, post-apply verifies the Telegram-observed set exactly
+  (order-insensitive) and rejects extra/missing/malformed raw sets. Legacy
+  callers that omit `allowedUpdates` keep the prior merge/include behavior.
+  Partial apply/reconcile results report post-operation observations only when
+  a real Telegram inspection returned them; otherwise they are `UNKNOWN`, and
+  desired settings are never promoted to observed state.
 - `operation=reconcile` is the explicit guarded corrective path: it requires a
   fresh preflight, Render current URL, zero backlog, resolved bot identity and
   signed runtime readiness, then resets the Telegram webhook secret in place
@@ -38,9 +47,10 @@
 - Added `check:render-telegram-cutover` in CI for fixed Render target/identity,
   read-only zero mutations, wrong SHA/version/DB/bot/current URL, invalid/
   unknown/nonzero pending counts, failed signed readiness/unresolved credential,
-  observed-vs-desired already-at-destination, exact post-apply sets, setWebhook
-  followed by DB persistence failure, explicit guarded reconciliation, and
-  no-automatic-retry partial/ambiguous failures using controlled Telegram
+  observed-vs-desired already-at-destination, malformed raw observations,
+  exact post-apply sets, setWebhook followed by DB persistence failure,
+  explicit guarded reconciliation, no-automatic-retry partial/ambiguous
+  failures, and observed-versus-desired separation using controlled Telegram
   responses. CI run `44511875590` passed with **26/26** cutover checks, 27/27
   Render migration checks, `v0.79.18`, and Playwright 175 passed / 0 failed /
   15 skipped.

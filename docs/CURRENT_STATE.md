@@ -50,6 +50,14 @@
   is the guarded in-place secret reset/corrective path; it is never automatic.
   When exact `allowedUpdates` is supplied, post-apply verification checks the
   observed set exactly and returns a truthful partial failure on mismatch.
+  Raw `allowed_updates` is validated before normalization; missing,
+  non-array, null, mixed-type or empty-string observations block preflight as
+  `OBSERVED_ALLOWED_UPDATES_MALFORMED` and cannot be exact, and the switch
+  refuses them as `MALFORMED_ALLOWED_UPDATES` when exact updates are required.
+  Legacy callers that omit `allowedUpdates` keep the prior merge/include
+  behavior. Partial apply/reconcile results report post-operation observed
+  settings only when Telegram was actually inspected; otherwise they remain
+  `UNKNOWN`, while desired settings stay separate.
   CI run `44511875590` passed the code HEAD with **26/26** cutover checks and
   27/27 Render migration checks. Manual `workflow_dispatch` from the candidate
   branch is unavailable until the workflow exists on `main` (GitHub returns

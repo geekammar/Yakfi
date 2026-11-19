@@ -130,22 +130,41 @@ function createTelegramFake(options: TelegramFakeOptions = {}) {
     }
     if (url.endsWith("/getWebhookInfo")) {
       getWebhookInfoCount += 1;
+      const hasPostAllowedUpdates = Object.prototype.hasOwnProperty.call(
+        options,
+        "postAllowedUpdates",
+      );
+      const hasAllowedUpdates = Object.prototype.hasOwnProperty.call(
+        options,
+        "allowedUpdates",
+      );
       const observedAllowedUpdates = postApply
-        ? (options.postAllowedUpdates ?? options.allowedUpdates)
-        : options.allowedUpdates;
+        ? hasPostAllowedUpdates
+          ? options.postAllowedUpdates
+          : hasAllowedUpdates
+            ? options.allowedUpdates
+            : ["message", "callback_query"]
+        : hasAllowedUpdates
+          ? options.allowedUpdates
+          : ["message", "callback_query"];
+      const webhookInfo: Record<string, unknown> = {
+        url: currentUrl,
+        pending_update_count: Object.prototype.hasOwnProperty.call(
+          options,
+          "pendingUpdateCount",
+        )
+          ? options.pendingUpdateCount
+          : 0,
+        last_error_date: options.lastErrorDate,
+        last_error_message: options.lastErrorMessage,
+      };
+      if (observedAllowedUpdates !== undefined) {
+        webhookInfo.allowed_updates = observedAllowedUpdates;
+      }
       return new Response(
         JSON.stringify({
           ok: true,
-          result: {
-            url: currentUrl,
-            pending_update_count: options.pendingUpdateCount ?? 0,
-            allowed_updates: observedAllowedUpdates ?? [
-              "message",
-              "callback_query",
-            ],
-            last_error_date: options.lastErrorDate,
-            last_error_message: options.lastErrorMessage,
-          },
+          result: webhookInfo,
         }),
         { status: 200 },
       );
@@ -281,16 +300,26 @@ async function runRealSwitch(
   options: {
     currentUrl?: string;
     pendingUpdateCount?: unknown;
+    currentAllowedUpdates?: unknown;
     postAllowedUpdates?: unknown;
     allowedUpdates?: string[];
     setWebhookThrows?: boolean;
     repository?: RepairTelegramWebhookDeps["connectionRepository"];
   } = {},
 ) {
+  const hasOwn = (key: string): boolean =>
+    Object.prototype.hasOwnProperty.call(options, key);
   const telegram = createTelegramFake({
     currentUrl: options.currentUrl ?? CURRENT_URL,
-    pendingUpdateCount: options.pendingUpdateCount ?? 0,
-    postAllowedUpdates: options.postAllowedUpdates,
+    ...(hasOwn("pendingUpdateCount")
+      ? { pendingUpdateCount: options.pendingUpdateCount }
+      : {}),
+    ...(hasOwn("currentAllowedUpdates")
+      ? { allowedUpdates: options.currentAllowedUpdates }
+      : {}),
+    ...(hasOwn("postAllowedUpdates")
+      ? { postAllowedUpdates: options.postAllowedUpdates }
+      : {}),
     setWebhookThrows: options.setWebhookThrows,
   });
   const repo = options.repository
@@ -787,6 +816,10 @@ async function main(): Promise<void> {
       apply.status === "PARTIAL_FAILURE" &&
         apply.ok === false &&
         apply.code === "SET_WEBHOOK_UNCERTAIN_RECOVERY_REQUIRED" &&
+        apply.observedAllowedUpdates === undefined &&
+        apply.observedAllowedUpdatesPhase === "UNKNOWN" &&
+        apply.desiredAllowedUpdates?.join(",") === "message,callback_query" &&
+        apply.exactSettingsMatch === false &&
         apply.remoteStateMayHaveChanged === true &&
         getSwitchCalls() === 1,
     );
@@ -1217,7 +1250,212 @@ async function main(): Promise<void> {
       result.status === "PARTIAL_FAILURE" &&
         result.ok === false &&
         result.code === "SET_WEBHOOK_UNCERTAIN_RECOVERY_REQUIRED" &&
+        result.observedAllowedUpdates === undefined &&
+        result.observedAllowedUpdatesPhase === "UNKNOWN" &&
+        result.desiredAllowedUpdates?.join(",") === "message,callback_query" &&
+        result.exactSettingsMatch === false &&
         getSwitchCalls() === 1,
+    );
+  }
+
+  // ─── 22. Malformed raw observations cannot become exact readiness ────────
+  {
+    const malformedCases: Array<{
+      label: string;
+      raw: unknown;
+      observed: string;
+    }> = [
+      {
+        label: "mixed valid/non-string array",
+        raw: ["message", "callback_query", 42],
+        observed: "message,callback_query",
+      },
+      {
+        label: "non-array value",
+        raw: "message,callback_query",
+        observed: "",
+      },
+      {
+        label: "missing value",
+        raw: undefined,
+        observed: "",
+      },
+      {
+        label: "null value",
+        raw: null,
+        observed: "",
+      },
+    ];
+    for (const item of malformedCases) {
+      const { deps, getSwitchCalls } = createDeps({
+        telegram: {
+          currentUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+          allowedUpdates: item.raw,
+        },
+      });
+      const preflight = await preflightRenderTelegramCutover(
+        preflightParams(),
+        deps,
+      );
+      const apply = await applyRenderTelegramCutover(
+        {
+          ...preflightParams(),
+          expectedCurrentWebhookUrl:
+            RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+        },
+        deps,
+      );
+      check(
+        `P22. Malformed raw allowed_updates (${item.label}) blocks exact readiness and apply`,
+        preflight.status === "BLOCKED" &&
+          preflight.code === "OBSERVED_ALLOWED_UPDATES_MALFORMED" &&
+          preflight.allowedUpdatesValid === false &&
+          preflight.exactSettingsMatch === false &&
+          preflight.observedAllowedUpdates.join(",") === item.observed &&
+          apply.status === "BLOCKED" &&
+          apply.code === "OBSERVED_ALLOWED_UPDATES_MALFORMED" &&
+          getSwitchCalls() === 0,
+      );
+    }
+
+    const reversed = createDeps({
+      telegram: {
+        currentUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+        allowedUpdates: ["callback_query", "message"],
+      },
+    });
+    const reversedPreflight = await preflightRenderTelegramCutover(
+      preflightParams(),
+      reversed.deps,
+    );
+    check(
+      "P22b. Valid reversed-order observations remain an exact no-op",
+      reversedPreflight.status === "ALREADY_AT_DESTINATION" &&
+        reversedPreflight.allowedUpdatesValid === true &&
+        reversedPreflight.exactSettingsMatch === true &&
+        reversedPreflight.observedAllowedUpdates.join(",") ===
+          "callback_query,message" &&
+        reversed.getSwitchCalls() === 0,
+    );
+  }
+
+  // ─── 23. Explicit switch rejects malformed current raw; legacy preserved ──
+  {
+    const explicitMalformed = await runRealSwitch({
+      currentAllowedUpdates: ["message", "callback_query", 42],
+      allowedUpdates: ["message", "callback_query"],
+    });
+    const explicitNonArray = await runRealSwitch({
+      currentAllowedUpdates: "message",
+      allowedUpdates: ["message", "callback_query"],
+    });
+    const explicitMissing = await runRealSwitch({
+      currentAllowedUpdates: undefined,
+      allowedUpdates: ["message", "callback_query"],
+    });
+    const explicitReversed = await runRealSwitch({
+      currentAllowedUpdates: ["callback_query", "message"],
+      allowedUpdates: ["message", "callback_query"],
+    });
+    const legacyMixed = await runRealSwitch({
+      currentAllowedUpdates: ["message", "callback_query", 42],
+    });
+    check(
+      "P23. Explicit allowedUpdates rejects mixed/non-array/missing raw current sets before setWebhook",
+      explicitMalformed.result.ok === false &&
+        explicitMalformed.result.code === "MALFORMED_ALLOWED_UPDATES" &&
+        explicitMalformed.telegram.getSetWebhookCount() === 0 &&
+        explicitMalformed.repo.getUpdateCount() === 0 &&
+        explicitNonArray.result.ok === false &&
+        explicitNonArray.result.code === "MALFORMED_ALLOWED_UPDATES" &&
+        explicitNonArray.telegram.getSetWebhookCount() === 0 &&
+        explicitMissing.result.ok === false &&
+        explicitMissing.result.code === "MALFORMED_ALLOWED_UPDATES" &&
+        explicitMissing.telegram.getSetWebhookCount() === 0,
+    );
+    check(
+      "P23b. Valid reversed-order raw current set is exact; legacy callers keep their prior behavior",
+      explicitReversed.result.ok === true &&
+        explicitReversed.result.status === "SWITCHED" &&
+        explicitReversed.result.exactSettingsMatch === true &&
+        explicitReversed.telegram.getSetWebhookCount() === 1 &&
+        legacyMixed.result.ok === true &&
+        legacyMixed.result.status === "SWITCHED" &&
+        legacyMixed.result.observedAllowedUpdatesValid === false &&
+        legacyMixed.result.exactSettingsMatch === false &&
+        legacyMixed.telegram.getSetWebhookCount() === 1,
+    );
+  }
+
+  // ─── 24. Malformed post-apply observations are rejected, not normalized ─
+  {
+    const mixedPost = await runRealSwitch({
+      allowedUpdates: ["message", "callback_query"],
+      postAllowedUpdates: ["message", "callback_query", 42],
+    });
+    const nonArrayPost = await runRealSwitch({
+      allowedUpdates: ["message", "callback_query"],
+      postAllowedUpdates: "message",
+    });
+    const missingPost = await runRealSwitch({
+      allowedUpdates: ["message", "callback_query"],
+      postAllowedUpdates: undefined,
+    });
+    const reversedPost = await runRealSwitch({
+      allowedUpdates: ["message", "callback_query"],
+      postAllowedUpdates: ["callback_query", "message"],
+    });
+    check(
+      "P24. Exact post-apply rejects mixed/non-array/missing raw observations and accepts reversed order",
+      mixedPost.result.ok === false &&
+        mixedPost.result.code === "POST_APPLY_REGISTRATION_MISMATCH" &&
+        mixedPost.result.observedAllowedUpdatesValid === false &&
+        mixedPost.telegram.getSetWebhookCount() === 1 &&
+        nonArrayPost.result.ok === false &&
+        nonArrayPost.result.code === "POST_APPLY_REGISTRATION_MISMATCH" &&
+        nonArrayPost.result.observedAllowedUpdatesValid === false &&
+        missingPost.result.ok === false &&
+        missingPost.result.code === "POST_APPLY_REGISTRATION_MISMATCH" &&
+        missingPost.result.observedAllowedUpdatesValid === false &&
+        reversedPost.result.ok === true &&
+        reversedPost.result.status === "SWITCHED" &&
+        reversedPost.result.exactSettingsMatch === true,
+    );
+  }
+
+  // ─── 25. Actual post-operation observations stay separate from desired ───
+  {
+    const partialWithObserved = {
+      ok: false as const,
+      status: "PARTIAL_FAILURE" as const,
+      code: "POST_APPLY_REGISTRATION_MISMATCH" as const,
+      botExternalId: RENDER_TELEGRAM_CUTOVER_TARGET.botExternalId,
+      botUsername: RENDER_TELEGRAM_CUTOVER_TARGET.botUsername,
+      webhookUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+      targetAllowedUpdates: [...RENDER_TELEGRAM_CUTOVER_TARGET.allowedUpdates],
+      observedAllowedUpdates: ["message"],
+      observedAllowedUpdatesValid: true,
+      desiredAllowedUpdates: [...RENDER_TELEGRAM_CUTOVER_TARGET.allowedUpdates],
+      exactSettingsMatch: false,
+      pendingUpdateCount: 0,
+      reconciliationCommand: "reviewed reconciliation",
+      restorationProcedure: "reviewed restoration",
+      remoteStateMayHaveChanged: true,
+      message: "mismatch",
+    };
+    const { deps } = createDeps({ switchResult: partialWithObserved });
+    const apply = await applyRenderTelegramCutover(
+      { ...preflightParams(), expectedCurrentWebhookUrl: CURRENT_URL },
+      deps,
+    );
+    check(
+      "P25. Partial failure reports actual post-operation observation separately from desired settings",
+      apply.status === "PARTIAL_FAILURE" &&
+        apply.observedAllowedUpdates?.join(",") === "message" &&
+        apply.observedAllowedUpdatesValid === true &&
+        apply.observedAllowedUpdatesPhase === "POST_OPERATION" &&
+        apply.desiredAllowedUpdates?.join(",") === "message,callback_query" &&
+        apply.exactSettingsMatch === false,
     );
   }
 }

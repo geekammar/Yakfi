@@ -31,6 +31,7 @@ import {
   type TelegramApiDeps,
 } from "@/server/integrations/telegram/telegram-client";
 import {
+  isValidAllowedUpdates,
   sameStringSet,
   switchTelegramBotWebhookDefault,
   validateCustomerWebhookUrl,
@@ -122,6 +123,7 @@ export type RenderTelegramPreflightResult = {
   pendingUpdateCount: number | null;
   pendingUpdateCountValid: boolean;
   allowedUpdates: string[];
+  allowedUpdatesValid: boolean;
   observedAllowedUpdates: string[];
   desiredAllowedUpdates: string[];
   exactSettingsMatch: boolean;
@@ -154,6 +156,8 @@ export type RenderTelegramApplyResult = {
   webhookUrl?: string;
   allowedUpdates?: string[];
   observedAllowedUpdates?: string[];
+  observedAllowedUpdatesValid?: boolean;
+  observedAllowedUpdatesPhase?: "PREFLIGHT" | "POST_OPERATION" | "UNKNOWN";
   desiredAllowedUpdates?: string[];
   exactSettingsMatch?: boolean;
   webhookSecretHashPersisted?: boolean;
@@ -196,6 +200,7 @@ function basePreflightResult(
     pendingUpdateCount: null,
     pendingUpdateCountValid: false,
     allowedUpdates: [],
+    allowedUpdatesValid: false,
     observedAllowedUpdates: [],
     desiredAllowedUpdates: [...RENDER_TELEGRAM_CUTOVER_TARGET.allowedUpdates],
     exactSettingsMatch: false,
@@ -310,6 +315,7 @@ async function readTelegramWebhookInfo(
       pendingUpdateCount: number | null;
       pendingUpdateCountValid: boolean;
       allowedUpdates: string[];
+      allowedUpdatesValid: boolean;
       lastErrorDate: number | null;
       lastErrorMessage: string | null;
     }
@@ -335,11 +341,15 @@ async function readTelegramWebhookInfo(
   const pending = info.pending_update_count;
   const pendingValid =
     typeof pending === "number" && Number.isInteger(pending) && pending >= 0;
-  const allowedUpdates = Array.isArray(info.allowed_updates)
-    ? info.allowed_updates.filter(
-        (value): value is string => typeof value === "string",
-      )
-    : [];
+  const rawAllowedUpdates = info.allowed_updates;
+  const allowedUpdatesValid = isValidAllowedUpdates(rawAllowedUpdates);
+  const allowedUpdates = allowedUpdatesValid
+    ? [...rawAllowedUpdates]
+    : Array.isArray(rawAllowedUpdates)
+      ? rawAllowedUpdates.filter(
+          (value): value is string => typeof value === "string",
+        )
+      : [];
   const lastErrorDate =
     typeof info.last_error_date === "number" &&
     Number.isFinite(info.last_error_date)
@@ -352,6 +362,7 @@ async function readTelegramWebhookInfo(
     pendingUpdateCount: pendingValid ? pending : null,
     pendingUpdateCountValid: pendingValid,
     allowedUpdates,
+    allowedUpdatesValid,
     lastErrorDate,
     lastErrorMessage: sanitizeTelegramErrorText(info.last_error_message),
   };
@@ -445,10 +456,9 @@ export async function preflightRenderTelegramCutover(
   const desiredAllowedUpdates = [
     ...RENDER_TELEGRAM_CUTOVER_TARGET.allowedUpdates,
   ];
-  const exactSettingsMatch = sameStringSet(
-    webhook.allowedUpdates,
-    desiredAllowedUpdates,
-  );
+  const exactSettingsMatch =
+    webhook.allowedUpdatesValid &&
+    sameStringSet(webhook.allowedUpdates, desiredAllowedUpdates);
   const telemetry = {
     ...base,
     ok: true,
@@ -456,6 +466,7 @@ export async function preflightRenderTelegramCutover(
     pendingUpdateCount: webhook.pendingUpdateCount,
     pendingUpdateCountValid: webhook.pendingUpdateCountValid,
     allowedUpdates: webhook.allowedUpdates,
+    allowedUpdatesValid: webhook.allowedUpdatesValid,
     observedAllowedUpdates: webhook.allowedUpdates,
     desiredAllowedUpdates,
     exactSettingsMatch,
@@ -468,6 +479,15 @@ export async function preflightRenderTelegramCutover(
     renderService,
     renderReadiness,
   };
+
+  if (!webhook.allowedUpdatesValid) {
+    return {
+      ...telemetry,
+      status: "BLOCKED",
+      code: "OBSERVED_ALLOWED_UPDATES_MALFORMED",
+      readyForApply: false,
+    };
+  }
 
   if (!webhook.pendingUpdateCountValid) {
     return {
@@ -543,9 +563,16 @@ function applyResult(
     status,
     code,
     preflight,
-    observedAllowedUpdates: preflight.observedAllowedUpdates,
+    observedAllowedUpdatesPhase: "UNKNOWN",
     desiredAllowedUpdates: preflight.desiredAllowedUpdates,
-    exactSettingsMatch: preflight.exactSettingsMatch,
+    ...(status === "BLOCKED"
+      ? {
+          observedAllowedUpdates: preflight.observedAllowedUpdates,
+          observedAllowedUpdatesValid: preflight.allowedUpdatesValid,
+          observedAllowedUpdatesPhase: "PREFLIGHT" as const,
+          exactSettingsMatch: preflight.exactSettingsMatch,
+        }
+      : {}),
     recoveryInstruction:
       "Do not retry blindly. Inspect Telegram getWebhookInfo and the DB webhook_secret_hash, then use the reviewed reconciliation procedure.",
     ...extra,
@@ -578,6 +605,8 @@ export async function applyRenderTelegramCutover(
       webhookUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
       allowedUpdates: preflight.observedAllowedUpdates,
       observedAllowedUpdates: preflight.observedAllowedUpdates,
+      observedAllowedUpdatesValid: preflight.allowedUpdatesValid,
+      observedAllowedUpdatesPhase: "PREFLIGHT",
       desiredAllowedUpdates: preflight.desiredAllowedUpdates,
       exactSettingsMatch: preflight.exactSettingsMatch,
       postApplyReadiness: preflight.renderReadiness,
@@ -632,6 +661,14 @@ export async function applyRenderTelegramCutover(
         {
           webhookUrl: outcome.webhookUrl,
           allowedUpdates: outcome.allowedUpdates,
+          observedAllowedUpdates:
+            outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
+          observedAllowedUpdatesValid:
+            outcome.observedAllowedUpdatesValid ?? false,
+          observedAllowedUpdatesPhase: "POST_OPERATION",
+          desiredAllowedUpdates:
+            outcome.desiredAllowedUpdates ?? preflight.desiredAllowedUpdates,
+          exactSettingsMatch: outcome.exactSettingsMatch ?? false,
           webhookSecretHashPersisted: outcome.webhookSecretHashPersisted,
           remoteStateMayHaveChanged: true,
         },
@@ -655,6 +692,14 @@ export async function applyRenderTelegramCutover(
         {
           webhookUrl: outcome.webhookUrl,
           allowedUpdates: outcome.allowedUpdates,
+          observedAllowedUpdates:
+            outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
+          observedAllowedUpdatesValid:
+            outcome.observedAllowedUpdatesValid ?? false,
+          observedAllowedUpdatesPhase: "POST_OPERATION",
+          desiredAllowedUpdates:
+            outcome.desiredAllowedUpdates ?? preflight.desiredAllowedUpdates,
+          exactSettingsMatch: outcome.exactSettingsMatch ?? false,
           webhookSecretHashPersisted: outcome.webhookSecretHashPersisted,
           postApplyReadiness: postReadiness,
           remoteStateMayHaveChanged: true,
@@ -666,6 +711,9 @@ export async function applyRenderTelegramCutover(
       allowedUpdates: outcome.allowedUpdates,
       observedAllowedUpdates:
         outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
+      observedAllowedUpdatesValid:
+        outcome.observedAllowedUpdatesValid ?? false,
+      observedAllowedUpdatesPhase: "POST_OPERATION",
       desiredAllowedUpdates:
         outcome.desiredAllowedUpdates ?? preflight.desiredAllowedUpdates,
       exactSettingsMatch:
@@ -687,6 +735,9 @@ export async function applyRenderTelegramCutover(
           outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
         observedAllowedUpdates:
           outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
+        observedAllowedUpdatesValid:
+          outcome.observedAllowedUpdatesValid ?? preflight.allowedUpdatesValid,
+        observedAllowedUpdatesPhase: "PREFLIGHT",
         desiredAllowedUpdates:
           outcome.desiredAllowedUpdates ?? preflight.desiredAllowedUpdates,
         exactSettingsMatch:
@@ -703,7 +754,17 @@ export async function applyRenderTelegramCutover(
   if (outcome.status === "PARTIAL_FAILURE") {
     return applyResult(preflight, "PARTIAL_FAILURE", outcome.code, {
       webhookUrl: outcome.webhookUrl,
-      allowedUpdates: outcome.targetAllowedUpdates,
+      desiredAllowedUpdates:
+        outcome.desiredAllowedUpdates ?? outcome.targetAllowedUpdates,
+      exactSettingsMatch: false,
+      ...(outcome.observedAllowedUpdates !== undefined
+        ? {
+            observedAllowedUpdates: outcome.observedAllowedUpdates,
+            observedAllowedUpdatesValid:
+              outcome.observedAllowedUpdatesValid ?? false,
+            observedAllowedUpdatesPhase: "POST_OPERATION" as const,
+          }
+        : {}),
       remoteStateMayHaveChanged: outcome.remoteStateMayHaveChanged ?? true,
     });
   }
@@ -728,6 +789,13 @@ export async function reconcileRenderTelegramCutover(
 
   if (preflight.status === "FAILED") {
     return applyResult(preflight, "FAILED", preflight.code);
+  }
+  if (!preflight.allowedUpdatesValid) {
+    return applyResult(
+      preflight,
+      "BLOCKED",
+      "OBSERVED_ALLOWED_UPDATES_MALFORMED",
+    );
   }
 
   if (
@@ -823,6 +891,9 @@ export async function reconcileRenderTelegramCutover(
           allowedUpdates: outcome.allowedUpdates,
           observedAllowedUpdates:
             outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
+          observedAllowedUpdatesValid:
+            outcome.observedAllowedUpdatesValid ?? false,
+          observedAllowedUpdatesPhase: "POST_OPERATION",
           desiredAllowedUpdates:
             outcome.desiredAllowedUpdates ?? preflight.desiredAllowedUpdates,
           exactSettingsMatch: outcome.exactSettingsMatch ?? false,
@@ -851,6 +922,9 @@ export async function reconcileRenderTelegramCutover(
           allowedUpdates: outcome.allowedUpdates,
           observedAllowedUpdates:
             outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
+          observedAllowedUpdatesValid:
+            outcome.observedAllowedUpdatesValid ?? false,
+          observedAllowedUpdatesPhase: "POST_OPERATION",
           desiredAllowedUpdates:
             outcome.desiredAllowedUpdates ?? preflight.desiredAllowedUpdates,
           exactSettingsMatch: outcome.exactSettingsMatch ?? false,
@@ -865,6 +939,9 @@ export async function reconcileRenderTelegramCutover(
       allowedUpdates: outcome.allowedUpdates,
       observedAllowedUpdates:
         outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
+      observedAllowedUpdatesValid:
+        outcome.observedAllowedUpdatesValid ?? false,
+      observedAllowedUpdatesPhase: "POST_OPERATION",
       desiredAllowedUpdates:
         outcome.desiredAllowedUpdates ?? preflight.desiredAllowedUpdates,
       exactSettingsMatch: outcome.exactSettingsMatch ?? false,
@@ -880,10 +957,17 @@ export async function reconcileRenderTelegramCutover(
   if (outcome.status === "PARTIAL_FAILURE") {
     return applyResult(preflight, "PARTIAL_FAILURE", outcome.code, {
       webhookUrl: outcome.webhookUrl,
-      allowedUpdates: outcome.targetAllowedUpdates,
-      observedAllowedUpdates: outcome.targetAllowedUpdates,
-      desiredAllowedUpdates: preflight.desiredAllowedUpdates,
+      desiredAllowedUpdates:
+        outcome.desiredAllowedUpdates ?? outcome.targetAllowedUpdates,
       exactSettingsMatch: false,
+      ...(outcome.observedAllowedUpdates !== undefined
+        ? {
+            observedAllowedUpdates: outcome.observedAllowedUpdates,
+            observedAllowedUpdatesValid:
+              outcome.observedAllowedUpdatesValid ?? false,
+            observedAllowedUpdatesPhase: "POST_OPERATION" as const,
+          }
+        : {}),
       remoteStateMayHaveChanged: outcome.remoteStateMayHaveChanged ?? true,
     });
   }
@@ -935,6 +1019,9 @@ function printPreflight(result: RenderTelegramPreflightResult): void {
   );
   writeSummaryLine(
     `- **Observed Allowed Updates**: \`${result.observedAllowedUpdates.join(", ") || "none"}\``,
+  );
+  writeSummaryLine(
+    `- **Observed Allowed Updates Valid**: \`${String(result.allowedUpdatesValid)}\``,
   );
   writeSummaryLine(
     `- **Desired Allowed Updates**: \`${result.desiredAllowedUpdates.join(", ") || "none"}\``,
@@ -994,9 +1081,22 @@ function printApply(result: RenderTelegramApplyResult): void {
   writeSummaryLine(
     `- **Webhook URL**: \`${result.webhookUrl ?? "unchanged"}\``,
   );
+  writeSummaryLine(
+    `- **Preflight Observed Allowed Updates**: \`${result.preflight.observedAllowedUpdates.join(", ") || "none"}\``,
+  );
+  writeSummaryLine(
+    `- **Preflight Observed Allowed Updates Valid**: \`${String(result.preflight.allowedUpdatesValid)}\``,
+  );
   if (result.observedAllowedUpdates) {
     writeSummaryLine(
-      `- **Observed Allowed Updates**: \`${result.observedAllowedUpdates.join(", ")}\``,
+      `- **Observed Allowed Updates (${result.observedAllowedUpdatesPhase ?? "UNKNOWN"})**: \`${result.observedAllowedUpdates.join(", ")}\``,
+    );
+    writeSummaryLine(
+      `- **Observed Allowed Updates Valid**: \`${String(result.observedAllowedUpdatesValid ?? false)}\``,
+    );
+  } else {
+    writeSummaryLine(
+      "- **Post-Operation Observed Allowed Updates**: `UNKNOWN` (not inferred from desired settings)",
     );
   }
   if (result.desiredAllowedUpdates) {

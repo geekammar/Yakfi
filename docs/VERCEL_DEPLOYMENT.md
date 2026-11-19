@@ -484,9 +484,17 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
      `drop_pending_updates`, and treats a genuinely exact already-at-destination
      registration as a zero-write no-op. A matching URL with extra/missing
      allowed_updates is blocked as `ALREADY_AT_DESTINATION_SETTINGS_MISMATCH`,
-     not treated as exact readiness. When exact `allowedUpdates` is supplied,
-     post-apply verification checks the Telegram-observed set exactly and
-     rejects extra/missing/malformed sets. Unknown/non-zero backlog or any
+     not treated as exact readiness. Raw observations are validated before
+     normalization: `allowed_updates` must be an array of non-empty strings.
+     Missing, non-array, null, mixed-type, or empty-string values block
+     preflight as `OBSERVED_ALLOWED_UPDATES_MALFORMED` and cannot produce
+     `exactSettingsMatch=true`; with explicit `allowedUpdates`, the switch
+     refuses such raw current observations as `MALFORMED_ALLOWED_UPDATES`
+     before mutation. When exact `allowedUpdates` is supplied, post-apply
+     verification checks the Telegram-observed set exactly (order-insensitive)
+     and rejects extra/missing/malformed raw sets. Legacy callers that omit
+     `allowedUpdates` retain the previous merge/include behavior.
+     Unknown/non-zero backlog or any
      failed identity/readiness check blocks apply. Do **not** use the legacy
      `cutover-main-runtime-*` Vercel operations for Render. The workflow must
      exist on `main` before its first manual dispatch; GitHub rejects dispatch
@@ -503,7 +511,10 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
    - **Partial-failure boundary:** Telegram `setWebhook` and PostgreSQL
      `webhook_secret_hash` persistence are not atomic. On partial or ambiguous
      failure, inspect `getWebhookInfo` and the DB hash, then use the reviewed
-     reconciliation procedure; never retry blindly.
+     reconciliation procedure; never retry blindly. Partial apply/reconcile
+     results report post-operation settings as observed only when a real
+     Telegram inspection returned them; otherwise they are `UNKNOWN`. Desired
+     settings remain separate and are never promoted to observed state.
 6. **Post-Cutover Verification & Release Tagging:**
    - Re-verify `getWebhookInfo` (`url === https://<render-origin>/api/telegram/webhook`,
      `allowed_updates` includes `message` and `callback_query`).
