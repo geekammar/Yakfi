@@ -75,9 +75,7 @@ export interface ConversationAi {
    * exactly this result for routing, counters, usage and attribution. Absent
    * implementations keep the legacy contract.
    */
-  respondWithExecution?(
-    request: AiRequest,
-  ): Promise<ConversationAiExecution>;
+  respondWithExecution?(request: AiRequest): Promise<ConversationAiExecution>;
 }
 
 // ─── Arabic text normalization ───────────────────────────────────────────────

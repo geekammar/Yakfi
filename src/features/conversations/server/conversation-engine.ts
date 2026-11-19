@@ -323,9 +323,7 @@ export function createPolicyBackedConversationAi(
       }
       return execution.response;
     },
-    respondWithExecution(
-      request: AiRequest,
-    ): Promise<ConversationAiExecution> {
+    respondWithExecution(request: AiRequest): Promise<ConversationAiExecution> {
       return executePolicyBackedRequest(deps, request);
     },
   };
@@ -6409,9 +6407,7 @@ async function runInboundTurn(
         ? turnTelemetry.retryTrace.attempts.map((a, idx) => ({
             attempt: a.attempt ?? idx + 1,
             provider:
-              a.provider ??
-              turnTelemetry?.finalProvider ??
-              aiProviderName,
+              a.provider ?? turnTelemetry?.finalProvider ?? aiProviderName,
             model: a.model ?? undefined,
             status: a.outcome === "SUCCESS" ? "SUCCESS" : "FAILURE",
             ...(a.httpAttempts !== undefined

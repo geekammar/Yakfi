@@ -819,12 +819,15 @@ not scaffold them here.
 
 - The engine default is the policy-backed `ConversationAi`
   (`defaultConversationEngineDeps.ai` = `policyBackedAi` →
-  `createPolicyBackedAi`): real adapters when the policy is readable. A
-  policy read/persistence/invalid failure yields the bounded unavailable
-  assistant, which throws into the existing `AI_FAILURE` / `NEED_HUMAN` safe
-  path with zero provider/JEV calls — never the lexical assistant.
-  `bypassDeterministicAi` still short-circuits decidable turns before any
-  provider call.
+  `createPolicyBackedAi`): real adapters when the policy is readable. The
+  production wrapper is stateless; each turn receives a request-scoped
+  execution result carrying its own response, provider identity, telemetry and
+  explicit policy-unavailable marker, so concurrent turns cannot exchange
+  evidence. A policy read/persistence/invalid failure yields the bounded
+  unavailable assistant, which throws into the existing `AI_FAILURE` /
+  `NEED_HUMAN` safe path with zero provider/JEV calls — never the lexical
+  assistant. `bypassDeterministicAi` still short-circuits decidable turns
+  before any provider call.
 - Cost-impacting telemetry is already implemented for the LLM path
   (`conversation-engine.ts` `recordUsage(AI_TURN)` + `usageRepository`);
   determinism is preserved by the Domain, not by withholding the boundary.

@@ -23,8 +23,10 @@
   throw, persistence failure or invalid stored policy returns a bounded
   `policy-unavailable` assistant that enters the existing
   `AI_FAILURE` / `NEED_HUMAN` safe path with zero provider/JEV calls and no
-  booking mutation. Valid-policy, real provider-failure, `/start` and valid
-  callback behavior are preserved.
+  booking mutation. The policy wrapper is stateless: response, provider,
+  telemetry and the explicit no-call marker are request-scoped, so concurrent
+  turns cannot exchange evidence. Valid-policy, real provider-failure,
+  `/start` and valid callback behavior are preserved.
 - **Not claimed:** no merge, deploy, production DB access, migration,
   Telegram/customer send or paid AI call. Required CI on the PR HEAD is the
   verification authority. PR #88 remains separate and untouched.

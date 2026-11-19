@@ -27,9 +27,22 @@
   and no execution attempts; the customer receives the existing
   `SAFE_HANDOFF_REPLIES.INVALID_OUTPUT` acknowledgment with
   `handoffCause=AI_FAILURE`.
+- **Concurrency follow-up:** the first implementation still kept
+  `lastTelemetryValue` / `lastProviderNameInner` on the shared
+  `policyBackedAi` wrapper. Concurrent turns could therefore read another
+  request's provider, telemetry or failure. The wrapper is now stateless and
+  `ConversationAi.respondWithExecution` returns a request-scoped response,
+  provider identity, telemetry and explicit `policyUnavailable` marker.
+  Routing, counters, usage, handoff cause and assistant-provider attribution
+  use only that invocation's result; `resolveTurnCounters` uses the explicit
+  marker, not a mutable provider name, and unknown evidence stays unknown.
 - **Tests:** NEW `check:policy-failure` plus updated `check:ai-provider` and
-  `check:conv-core-03b2a`; mocked policy/provider boundaries only. Required CI
-  on the PR HEAD is the verification authority.
+  `check:conv-core-03b2a`; mocked policy/provider boundaries only. NEW
+  `check:policy-failure-scope` drives the real stateless wrapper with
+  controlled/deferred promises across both completion orders for policy
+  failure vs success, policy failure vs provider failure, and two successful
+  providers with different model/token evidence. Required CI on the PR HEAD
+  is the verification authority.
 - **Not done:** no merge, deploy, production DB access, migration,
   Telegram/customer send or paid AI call. No provider removal, registry
   retirement, pricing, billing or persistence change.

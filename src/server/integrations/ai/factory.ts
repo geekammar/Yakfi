@@ -164,8 +164,7 @@ export function isPolicyUnavailableAi(
   ai: ConversationAi,
 ): ai is PolicyUnavailableConversationAi {
   return (
-    (ai as { readonly policyUnavailable?: unknown }).policyUnavailable ===
-    true
+    (ai as { readonly policyUnavailable?: unknown }).policyUnavailable === true
   );
 }
 

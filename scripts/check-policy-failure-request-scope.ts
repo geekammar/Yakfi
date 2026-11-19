@@ -314,7 +314,10 @@ async function policyFailureBeforeProviderFailure(): Promise<void> {
   const wrapper = makeWrapper(fetch.fetchImpl, policies.getAiPolicyImpl);
 
   const failure = execute(wrapper, requestFor("policy failure request"));
-  const providerFailure = execute(wrapper, requestFor("provider failure request"));
+  const providerFailure = execute(
+    wrapper,
+    requestFor("provider failure request"),
+  );
 
   policies.gates[1]!.resolve(policySuccess(OPENROUTER_POLICY));
   await fetch.started;
@@ -346,7 +349,10 @@ async function providerFailureBeforePolicyFailure(): Promise<void> {
   const wrapper = makeWrapper(fetch.fetchImpl, policies.getAiPolicyImpl);
 
   const failure = execute(wrapper, requestFor("policy failure request"));
-  const providerFailure = execute(wrapper, requestFor("provider failure request"));
+  const providerFailure = execute(
+    wrapper,
+    requestFor("provider failure request"),
+  );
 
   policies.gates[1]!.resolve(policySuccess(OPENROUTER_POLICY));
   await fetch.started;
@@ -377,10 +383,7 @@ async function twoSuccessesDifferentEvidence(
   const fetch = providerFetch();
   const wrapper = makeWrapper(fetch.fetchImpl, policies.getAiPolicyImpl);
 
-  const openrouterRequest = execute(
-    wrapper,
-    requestFor("openrouter request"),
-  );
+  const openrouterRequest = execute(wrapper, requestFor("openrouter request"));
   const agentrouterRequest = execute(
     wrapper,
     requestFor("agentrouter request"),
