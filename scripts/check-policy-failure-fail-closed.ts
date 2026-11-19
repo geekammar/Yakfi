@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import "./setup-test-env";
 
 /**
@@ -246,8 +245,7 @@ async function main(): Promise<void> {
     check(
       `4.${index + 1}b booking request under ${failure.label} → existing safe acknowledgment only`,
       assistantMessages.length === 1 &&
-        assistantMessages[0]?.content ===
-          SAFE_HANDOFF_REPLIES.INVALID_OUTPUT,
+        assistantMessages[0]?.content === SAFE_HANDOFF_REPLIES.INVALID_OUTPUT,
     );
     check(
       `4.${index + 1}c booking request under ${failure.label} → no booking mutation and no lexical interpretation`,
@@ -345,8 +343,7 @@ async function main(): Promise<void> {
         result.conversationStatus === "AI_ACTIVE" &&
         result.intent === "GREETING" &&
         result.assistantProvider === "openrouter" &&
-        assistantMessages[0]?.content ===
-          "وعليكم السلام ورحمة الله وبركاته",
+        assistantMessages[0]?.content === "وعليكم السلام ورحمة الله وبركاته",
     );
     check(
       "6b valid policy → one physical attempt, one logical model call, no false zero",
@@ -395,8 +392,7 @@ async function main(): Promise<void> {
         result.conversationStatus === "NEED_HUMAN" &&
         result.handoffCause === "PROVIDER_FAILURE" &&
         assistantMessages.length === 1 &&
-        assistantMessages[0]?.content ===
-          SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE,
+        assistantMessages[0]?.content === SAFE_HANDOFF_REPLIES.PROVIDER_FAILURE,
     );
     check(
       "7b provider failure keeps real physical-attempt evidence",
