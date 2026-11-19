@@ -158,9 +158,7 @@ describe("getConversationRefresh", () => {
 
     const result = await getConversationRefresh(BUSINESS_ID, CONVERSATION_ID);
 
-    expect(
-      usageRepository.listOutboundDeliveryStatuses,
-    ).toHaveBeenCalledWith({
+    expect(usageRepository.listOutboundDeliveryStatuses).toHaveBeenCalledWith({
       businessId: BUSINESS_ID,
       conversationId: CONVERSATION_ID,
       messageIds: [aiMessageId],

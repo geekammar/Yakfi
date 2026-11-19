@@ -1015,9 +1015,7 @@ async function main(): Promise<void> {
         ? rateLimitedTurn.delivery
         : null;
     const networkDelivery =
-      networkTurn.ok && !networkTurn.duplicate
-        ? networkTurn.delivery
-        : null;
+      networkTurn.ok && !networkTurn.duplicate ? networkTurn.delivery : null;
     const permanentOutcome = mapEngineResultToTelegramOutcome(
       permanentTurn as any,
     );

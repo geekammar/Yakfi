@@ -1367,9 +1367,7 @@ function resumeBookingExtraction(
       : null;
   const date = rec.isRemoved("date")
     ? null
-    : (rec.setFacts.get("date")?.value ??
-      e.date ??
-      resumableStateDate);
+    : (rec.setFacts.get("date")?.value ?? e.date ?? resumableStateDate);
 
   let exactTime = e.exactTime ?? null;
   if (rec.isRemoved("exactTime")) {

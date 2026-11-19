@@ -141,9 +141,7 @@ export async function callTelegramApi<T>(
       error: new TransportError(code, telegramFailureMessage(code), {
         failureStage: "PROVIDER_HTTP",
         httpStatus: response.status,
-        ...(retryAfter !== undefined
-          ? { retryAfterSeconds: retryAfter }
-          : {}),
+        ...(retryAfter !== undefined ? { retryAfterSeconds: retryAfter } : {}),
       }),
     };
   }

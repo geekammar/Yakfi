@@ -1116,9 +1116,7 @@ export function pruneExpiredBookingTemporalFacts(
 ): ConversationState {
   const date = state.knownFacts.date;
   const dateIsExpired =
-    typeof date === "string" &&
-    isValidIsoCalendarDate(date) &&
-    date < todayIso;
+    typeof date === "string" && isValidIsoCalendarDate(date) && date < todayIso;
 
   const range = state.knownFacts.dateRange;
   const rangeIsExpired =
