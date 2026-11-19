@@ -1,5 +1,39 @@
 # FlowPilot — Build State
 
+## AI policy-resolution failure must fail closed (Draft PR, v0.79.21) — 19 November 2026
+
+- Baseline verified: `main` `fdf8e56dad5c7bc4e5ff1f35968dd61b4ade5a6b`
+  (`0.79.20`, PR #94 merged at `2026-11-19T21:04:08Z`). The old PR #94 branch
+  and PR #88 were not modified.
+- **Read-only Render verification:** `/api/health/live` and `/api/health`
+  returned HTTP `200` at `2026-11-19T21:07Z` with `version: "0.79.20"`,
+  exact `commitSha: fdf8e56dad5c7bc4e5ff1f35968dd61b4ade5a6b`,
+  `environment: "production"`, `deploymentReady: true`,
+  `database: "connected"` and `missingEnvVars: []`. This verifies the merged
+  source/version and readiness; it is not a product acceptance, Telegram send
+  or database mutation.
+- **Finding:** `createPolicyBackedAi` returned `deterministicConversationAi`
+  when the policy read threw, persistence failed, or the stored policy was
+  invalid. On a structured free-form request, that lexical fallback could
+  interpret and answer/route the customer message instead of failing safe.
+- **Fix:** policy failure now returns a bounded `policy-unavailable`
+  `ConversationAi` that throws into the existing `AI_FAILURE` / `NEED_HUMAN`
+  safe path. It makes no provider or JEV request and performs no lexical
+  interpretation. The valid-policy and real provider-failure paths are
+  unchanged. `/start` and valid offer callbacks remain protocol-driven and
+  zero-call.
+- **Evidence:** policy-failure turns report `providerAttempts=0`,
+  `modelCallCount=0`, `providerStatus=NOT_CALLED`, no `AI_TURN` usage record
+  and no execution attempts; the customer receives the existing
+  `SAFE_HANDOFF_REPLIES.INVALID_OUTPUT` acknowledgment with
+  `handoffCause=AI_FAILURE`.
+- **Tests:** NEW `check:policy-failure` plus updated `check:ai-provider` and
+  `check:conv-core-03b2a`; mocked policy/provider boundaries only. Required CI
+  on the PR HEAD is the verification authority.
+- **Not done:** no merge, deploy, production DB access, migration,
+  Telegram/customer send or paid AI call. No provider removal, registry
+  retirement, pricing, billing or persistence change.
+
 ## Conversation Lab alignment with current semantic architecture (Draft PR, v0.79.20) — 19 November 2026
 
 - Baseline verified: `main` `c19365e731a985af77988749078c346fe89d2f06`

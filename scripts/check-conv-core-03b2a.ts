@@ -35,7 +35,7 @@ import "./setup-test-env";
  *  14. Invalid output causes no guessed appointment and resolves safely to NEED_HUMAN
  *
  * D. Policy and Compatibility:
- *  15. Prohibited/invalid AI policy falls back safely to deterministic assistant (0 calls); positive control reaches generative provider (1 generative, 0 JEV)
+ *  15. Prohibited/invalid AI policy fails closed to the bounded unavailable assistant (0 calls, safe handoff); positive control reaches generative provider (1 generative, 0 JEV)
  *  16. Staff-assigned conversation preserves human ownership (DEFERRED_TO_STAFF)
  *  17. Requests without the capability: eligible turns execute bounded JEV inference (1 JEV, 0 LLM); greeting turns preserve 0-call bypass
  *  18. No second model chain: exactly 1 generative provider attempt and 0 JEV on measured fixture
@@ -67,7 +67,10 @@ import {
   withPresentedOffer,
 } from "../src/features/conversations/server/conversation-state";
 import { createLlmConversationAi } from "../src/server/integrations/ai/conversation-ai";
-import { createPolicyBackedAi } from "../src/server/integrations/ai/factory";
+import {
+  POLICY_UNAVAILABLE_AI_PROVIDER,
+  createPolicyBackedAi,
+} from "../src/server/integrations/ai/factory";
 import {
   createJevDecisionsProvider,
   type JevDecisionsProvider,
@@ -1038,8 +1041,8 @@ async function runSuite(): Promise<void> {
   });
 
   check(
-    "D15a. Prohibited/invalid AI policy resolves to deterministic fallback assistant",
-    prohibitedPolicyAi.providerName === "deterministic",
+    "D15a. Prohibited/invalid AI policy resolves to the bounded unavailable assistant (never the lexical fallback)",
+    prohibitedPolicyAi.providerName === POLICY_UNAVAILABLE_AI_PROVIDER,
   );
 
   const prohibitedTurnRes = await runTurn("عايز أحجز كشف", {
@@ -1047,10 +1050,13 @@ async function runSuite(): Promise<void> {
   });
 
   check(
-    "D15b. Request with requiredSemanticCapability='structured_turn' under prohibited policy spends ZERO generative and ZERO JEV calls",
+    "D15b. Structured free-form request under prohibited policy fails closed: safe handoff + ZERO generative/JEV calls",
     prohibitedTurnRes.ok === true &&
       "assistantProvider" in prohibitedTurnRes &&
-      prohibitedTurnRes.assistantProvider === "deterministic" &&
+      prohibitedTurnRes.assistantProvider === POLICY_UNAVAILABLE_AI_PROVIDER &&
+      prohibitedTurnRes.assistantAction === "AI_HANDOFF" &&
+      prohibitedTurnRes.conversationStatus === "NEED_HUMAN" &&
+      prohibitedTurnRes.handoffCause === "AI_FAILURE" &&
       capturedGenerativeRequests.length === genCallsBeforeProhibited &&
       capturedJevRequests.length === jevCallsBeforeProhibited,
   );

@@ -234,7 +234,10 @@ import type {
   KnowledgeGapCategory,
   RecordUsageDto,
 } from "@/lib/validation";
-import { createPolicyBackedAi } from "@/server/integrations/ai/factory";
+import {
+  POLICY_UNAVAILABLE_AI_PROVIDER,
+  createPolicyBackedAi,
+} from "@/server/integrations/ai/factory";
 import { JEV_DETERMINISTIC_PROVIDER } from "@/server/integrations/ai/jev-strategy";
 import type {
   AiTelemetry,
@@ -327,10 +330,17 @@ const policyBackedAi: ConversationAi = {
             lastTelemetryValue = t as AiTelemetry;
             if (lastTelemetryValue.finalProvider)
               lastProviderNameInner = lastTelemetryValue.finalProvider;
+          } else {
+            // Never reuse an earlier turn's telemetry for this failure.
+            lastTelemetryValue = null;
           }
         } catch {
           // telemetry is best-effort
+          lastTelemetryValue = null;
         }
+      } else {
+        // Never reuse an earlier turn's telemetry for this failure.
+        lastTelemetryValue = null;
       }
       throw error;
     }
@@ -3479,6 +3489,7 @@ export function resolveTurnCounters(params: {
   if (
     deterministicBypass ||
     providerName === "deterministic" ||
+    providerName === POLICY_UNAVAILABLE_AI_PROVIDER ||
     turnTelemetry?.finalProvider === "deterministic-bypass"
   ) {
     return {
@@ -6205,14 +6216,21 @@ async function runInboundTurn(
         turn = null;
       }
       turnTelemetry = readAiTelemetry(deps.ai);
+      if (deps.ai.providerName === POLICY_UNAVAILABLE_AI_PROVIDER) {
+        // A policy-unavailable turn never had a provider execution. Ignore any
+        // stale/foreign telemetry so this request cannot borrow another
+        // request's attempts.
+        turnTelemetry = null;
+      }
       const telemetry = turnTelemetry;
       const jevCallSpent = !!telemetry?.jevDecision?.semantic?.jevCallSpent;
-      const isBypassTelemetry =
+      const isNoServingCall =
         deps.ai.providerName === "deterministic" ||
+        deps.ai.providerName === POLICY_UNAVAILABLE_AI_PROVIDER ||
         telemetry?.finalProvider === "deterministic-bypass" ||
         (telemetry?.finalProvider === JEV_DETERMINISTIC_PROVIDER &&
           !jevCallSpent);
-      if (!isBypassTelemetry) {
+      if (!isNoServingCall) {
         lastAttempt = telemetry?.attempts[telemetry.attempts.length - 1];
         successAttempt = telemetry
           ? [...telemetry.attempts]
@@ -6266,11 +6284,13 @@ async function runInboundTurn(
     //     compatibility bridge from the existing intent + action.
     const turnRouting: AiRoutingDecision = deterministicBypass
       ? "DETERMINISTIC_BYPASS"
-      : turnTelemetry?.finalProvider === JEV_DETERMINISTIC_PROVIDER
-        ? "JEV"
-        : deps.ai.providerName === "deterministic"
-          ? "DETERMINISTIC"
-          : "LLM";
+      : deps.ai.providerName === POLICY_UNAVAILABLE_AI_PROVIDER
+        ? "NONE"
+        : turnTelemetry?.finalProvider === JEV_DETERMINISTIC_PROVIDER
+          ? "JEV"
+          : deps.ai.providerName === "deterministic"
+            ? "DETERMINISTIC"
+            : "LLM";
 
     // CORE-03B2B1: Identify candidate generative structured turn.
     const isGenerativeStructuredTurn =

@@ -54,7 +54,7 @@ function buildRequest(
 }
 
 async function main(): Promise<void> {
-  const { createPolicyBackedAi } =
+  const { POLICY_UNAVAILABLE_AI_PROVIDER, createPolicyBackedAi } =
     await import("../src/server/integrations/ai/factory");
   const { detectTurnControlSignals } =
     await import("../src/features/conversations/server/conversation-ai");
@@ -71,9 +71,12 @@ async function main(): Promise<void> {
   };
 
   console.log("provider:", ai.providerName);
-  if (ai.providerName === "deterministic") {
+  if (
+    ai.providerName === "deterministic" ||
+    ai.providerName === POLICY_UNAVAILABLE_AI_PROVIDER
+  ) {
     console.log(
-      "NOTE: policy resolved to the deterministic assistant (no live",
+      "NOTE: policy resolved to a non-live/unavailable assistant (no live",
     );
     console.log("      provider configured). Real-LLM verification SKIPPED.");
     console.log("PROBE_RESULT: NOT_LIVE");

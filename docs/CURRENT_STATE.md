@@ -1,11 +1,33 @@
 # FlowPilot — Current State
 
-> **Tier 0 orientation snapshot — as of 18 November 2026.** Read with
-> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0 records live
-> Render readiness and the cutover tooling candidate; 00/0A/0B and Sections 1–9
-> retain all prior release, R5, R6, Y83 and QA249/QA250 evidence unchanged. The
-> Render app is technically ready; Telegram cutover and live product acceptance
-> have not been performed; PR88 remains open.
+> **Tier 0 orientation snapshot — as of 19 November 2026.** Read with
+> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0D records the
+> merged PR #94 deployment verification and the AI policy fail-closed
+> candidate; Section 0 retains live Render readiness and the cutover tooling
+> candidate; 00/0A/0B and Sections 1–9 retain all prior release, R5, R6, Y83
+> and QA249/QA250 evidence unchanged. The Render app is technically ready;
+> Telegram cutover and live product acceptance have not been performed; PR88
+> remains open.
+
+## 0D. AI policy fail-closed candidate — 19 November 2026
+
+- **PR #94 is merged:** merge commit
+  `fdf8e56dad5c7bc4e5ff1f35968dd61b4ade5a6b` (`0.79.20`), merged at
+  `2026-11-19T21:04:08Z`. Read-only Render verification at `21:07Z`:
+  `/api/health/live` and `/api/health` HTTP `200`, exact commit
+  `fdf8e56`, version `0.79.20`, `environment=production`,
+  `deploymentReady=true`, `database=connected`, `missingEnvVars=[]`.
+  This is deployment/readiness evidence, not live product acceptance.
+- **Draft candidate `0.79.21`:** `createPolicyBackedAi` no longer returns the
+  lexical `deterministicConversationAi` when policy resolution fails. A read
+  throw, persistence failure or invalid stored policy returns a bounded
+  `policy-unavailable` assistant that enters the existing
+  `AI_FAILURE` / `NEED_HUMAN` safe path with zero provider/JEV calls and no
+  booking mutation. Valid-policy, real provider-failure, `/start` and valid
+  callback behavior are preserved.
+- **Not claimed:** no merge, deploy, production DB access, migration,
+  Telegram/customer send or paid AI call. Required CI on the PR HEAD is the
+  verification authority. PR #88 remains separate and untouched.
 
 ## 0C. Booking/delivery/transcript repair candidate — 19 November 2026
 
