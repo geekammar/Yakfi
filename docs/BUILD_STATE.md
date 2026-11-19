@@ -14,8 +14,12 @@
   separate relevance/override badges; canonical validator feedback; publish
   disabled while invalid; dirty comparison against the loaded effective text;
   unsaved-edit indicator; discard confirmation; drafts preserved on failed
-  publish/readback. Existing overrides/history and protected read-only rules
-  are preserved.
+  publish/readback. Follow-up repair: the editor is read-only from the
+  mutation request through the readback (with a single in-flight guard), a
+  dirty restore/reset requires one explicit confirmation that names both
+  stored-override replacement and local-draft loss, and close/Escape/overlay/
+  swipe are blocked while a write is pending. Existing overrides/history and
+  protected read-only rules are preserved.
 - **Separate finding (not changed):** a policy-resolution failure returns
   `deterministicConversationAi`, which can lexically interpret structured
   free-form input and emit legacy templates. A fail-closed replacement and

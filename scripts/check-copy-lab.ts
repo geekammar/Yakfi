@@ -2810,11 +2810,14 @@ async function main(): Promise<void> {
     "<HistorySection",
     "publishCopyOverrideAction(",
     "resetCopyOverrideAction(",
-    "restoreCopyOverrideAction(",
   ];
-  const surfacesGuarded = mutationSurfaces.every(
-    (surface) => labDetailSource.indexOf(surface) > firstGuard,
-  );
+  const restoreHandlerPresent =
+    /function requestRestore\(/.test(labDetailSource) &&
+    /function confirmRestore\(/.test(labDetailSource);
+  const surfacesGuarded =
+    mutationSurfaces.every(
+      (surface) => labDetailSource.indexOf(surface) > firstGuard,
+    ) && restoreHandlerPresent;
   const protectedBranchStart = labDetailSource.indexOf("{isProtected ? (");
   const protectedBranchEnd = labDetailSource.indexOf(
     ") : (",

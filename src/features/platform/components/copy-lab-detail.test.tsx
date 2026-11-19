@@ -224,6 +224,20 @@ async function settle(): Promise<void> {
   });
 }
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function text(): string {
   return document.body.textContent ?? "";
 }
@@ -883,6 +897,18 @@ describe("Conversation Lab Protected Guidance & Mutation Feedback Lifecycle (PR6
       editorTextarea()?.value,
       "failed readback must preserve the local edit",
     ).toBe("تعديل ينجح مع فشل القراءة الراجعة");
+    expect(
+      editorTextarea()?.readOnly,
+      "failed readback must release the editor lock",
+    ).toBe(false);
+    expect(
+      publishCopyOverrideAction,
+      "readback failure must not trigger a silent retry",
+    ).toHaveBeenCalledTimes(1);
+    act(() => {
+      typeInEditor(editorTextarea()!, "تعديل بعد فشل القراءة");
+    });
+    expect(editorTextarea()?.value).toBe("تعديل بعد فشل القراءة");
   });
 
   it("failed publish preserves the local edit and never reports success", async () => {
@@ -915,6 +941,17 @@ describe("Conversation Lab Protected Guidance & Mutation Feedback Lifecycle (PR6
       "a failed publish must keep the draft exactly as typed",
     ).toBe("تعديل يجب ألا يضيع عند الفشل");
     expect(text()).not.toContain("تم حفظ التجاوز");
+    expect(
+      editorTextarea()?.readOnly,
+      "a failed publish must release the editor lock",
+    ).toBe(false);
+    act(() => {
+      typeInEditor(editorTextarea()!, "تعديل بعد فشل النشر");
+    });
+    expect(
+      editorTextarea()?.value,
+      "the editor accepts edits again after a failed publish",
+    ).toBe("تعديل بعد فشل النشر");
   });
 });
 
@@ -1013,6 +1050,179 @@ describe("Conversation Lab editor alignment (validation, dirty state, discard)",
       findButton("تجاهل وإغلاق")!.click();
     });
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("Conversation Lab async mutation protection", () => {
+  it("locks the editor from the publish request through the readback", async () => {
+    const entry = findEntry("greeting.invite");
+    const readback = deferred<GetCopyLabEntryStateResult>();
+    const publish = deferred<unknown>();
+    getCopyLabEntryStateAction
+      .mockResolvedValueOnce(successState(entry))
+      .mockImplementationOnce(() => readback.promise);
+    publishCopyOverrideAction.mockImplementationOnce(() => publish.promise);
+    renderDetail(entry);
+    await settle();
+
+    act(() => {
+      typeInEditor(editorTextarea()!, PUBLISHED_TEXT);
+    });
+    const publishBtn = findButton(PUBLISH_LABEL);
+    expect(publishBtn).not.toBeNull();
+    await act(async () => {
+      publishBtn!.click();
+    });
+
+    expect(publishCopyOverrideAction).toHaveBeenCalledTimes(1);
+    expect(editorTextarea()?.readOnly).toBe(true);
+    expect(text()).toContain("جارٍ حفظ النشر");
+    act(() => {
+      typeInEditor(editorTextarea()!, "نص أحدث أثناء انتظار النشر");
+    });
+    expect(
+      editorTextarea()?.value,
+      "the editor must reject a newer edit while publish is pending",
+    ).toBe(PUBLISHED_TEXT);
+    publishBtn!.click();
+    expect(
+      publishCopyOverrideAction,
+      "overlapping publish must not start a second mutation",
+    ).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      publish.resolve({
+        success: true,
+        data: {
+          id: "ov-pending",
+          copyKey: entry.key,
+          text: PUBLISHED_TEXT,
+          actorId: "operator",
+          updatedAt: "2026-10-30T12:00:00.000Z",
+        },
+      });
+    });
+    await settle();
+
+    expect(
+      editorTextarea()?.readOnly,
+      "the editor must stay locked while the readback is still pending",
+    ).toBe(true);
+    expect(text()).toContain("جارٍ");
+    act(() => {
+      typeInEditor(editorTextarea()!, "نص أحدث أثناء القراءة الراجعة");
+    });
+    expect(editorTextarea()?.value).toBe(PUBLISHED_TEXT);
+
+    await act(async () => {
+      readback.resolve(successWithOverride(entry));
+    });
+    await settle();
+
+    expect(editorTextarea()?.readOnly).toBe(false);
+    expect(editorTextarea()?.value).toBe(PUBLISHED_TEXT);
+  });
+
+  it("requires confirmation before a dirty restore and keeps the draft on cancel", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(
+      successWithHistoryItem(entry, "hist-dirty", "نص مسترجع"),
+    );
+    renderDetail(entry);
+    await settle();
+
+    act(() => {
+      typeInEditor(editorTextarea()!, "مسودة محلية قبل الاسترجاع");
+    });
+    await act(async () => {
+      findButton(RESTORE_LABEL)!.click();
+    });
+
+    expect(
+      restoreCopyOverrideAction,
+      "cancel path must not invoke restore before confirmation",
+    ).not.toHaveBeenCalled();
+    expect(text()).toContain("تأكيد استرجاع نسخة من السجل");
+    expect(text()).toContain("سيستبدل التجاوز المنشور");
+    expect(text()).toContain("ستُفقد تعديلاتك المحلية");
+
+    await act(async () => {
+      findButton("إلغاء")!.click();
+    });
+    expect(restoreCopyOverrideAction).not.toHaveBeenCalled();
+    expect(editorTextarea()?.value).toBe("مسودة محلية قبل الاسترجاع");
+  });
+
+  it("performs exactly one restore after dirty confirmation and applies readback", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(
+      successWithHistoryItem(entry, "hist-confirm", "نص مسترجع"),
+    );
+    renderDetail(entry);
+    await settle();
+
+    act(() => {
+      typeInEditor(editorTextarea()!, "مسودة محلية قبل التأكيد");
+    });
+    await act(async () => {
+      findButton(RESTORE_LABEL)!.click();
+    });
+
+    restoreCopyOverrideAction.mockResolvedValue({
+      success: true,
+      data: { restored: true },
+    });
+    getCopyLabEntryStateAction.mockResolvedValue(successWithOverride(entry));
+
+    await act(async () => {
+      findButton("تأكيد الاسترجاع")!.click();
+    });
+    await settle();
+
+    expect(restoreCopyOverrideAction).toHaveBeenCalledTimes(1);
+    expect(restoreCopyOverrideAction).toHaveBeenCalledWith({
+      historyId: "hist-confirm",
+    });
+    expect(editorTextarea()?.value).toBe(PUBLISHED_TEXT);
+    expect(editorTextarea()?.readOnly).toBe(false);
+  });
+
+  it("warns that reset discards a dirty draft and cancel preserves it", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(successWithOverride(entry));
+    renderDetail(entry);
+    await settle();
+
+    act(() => {
+      typeInEditor(editorTextarea()!, "مسودة محلية قبل إعادة التعيين");
+    });
+    await act(async () => {
+      findButton(RESET_LABEL)!.click();
+    });
+
+    expect(text()).toContain("تأكيد إعادة التعيين في المخزن");
+    expect(text()).toContain("ستُفقد تعديلاتك المحلية");
+    expect(resetCopyOverrideAction).not.toHaveBeenCalled();
+
+    await act(async () => {
+      findButton("إلغاء")!.click();
+    });
+    expect(resetCopyOverrideAction).not.toHaveBeenCalled();
+    expect(editorTextarea()?.value).toBe("مسودة محلية قبل إعادة التعيين");
+  });
+
+  it("keeps a clean close immediate", async () => {
+    const onOpenChange = vi.fn();
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry, onOpenChange);
+    await settle();
+
+    await act(async () => {
+      findButton("إغلاق")!.click();
+    });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(text()).not.toContain("لديك تعديلات محلية غير مطبقة");
   });
 });
 

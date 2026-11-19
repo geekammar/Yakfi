@@ -89,7 +89,7 @@ import {
   UploadIcon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /** Arabic surfaces for the renderer's typed failure codes. */
 const RENDER_FAILURE_LABELS: Readonly<Record<CopyRenderFailureCode, string>> = {
@@ -102,6 +102,12 @@ const RENDER_FAILURE_LABELS: Readonly<Record<CopyRenderFailureCode, string>> = {
 
 const PROTECTED_BADGE = "محمي — للقراءة فقط";
 const MAX_COPY_LENGTH = 400;
+
+const PENDING_MUTATION_LABELS: Readonly<Record<MutationKind, string>> = {
+  publish: "جارٍ حفظ النشر والتحقق من القراءة الراجعة",
+  reset: "جارٍ إعادة التعيين والتحقق من القراءة الراجعة",
+  restore: "جارٍ الاسترجاع والتحقق من القراءة الراجعة",
+};
 
 /**
  * The service error shape the actions return, mirrored structurally so this
@@ -172,7 +178,11 @@ export function CopyLabDetail({
     readonly message: string;
   } | null>(null);
   const [confirmingReset, setConfirmingReset] = useState(false);
+  const [confirmingRestoreId, setConfirmingRestoreId] = useState<string | null>(
+    null,
+  );
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const mutationInFlightRef = useRef(false);
 
   const applyResult = useCallback(
     (result: GetCopyLabEntryStateResult) => {
@@ -209,7 +219,6 @@ export function CopyLabDetail({
     ok: boolean;
     source?: EffectiveCopySource;
   }> => {
-    setLoading(true);
     setError(null);
     try {
       const result = await getCopyLabEntryStateAction(entry.key);
@@ -232,8 +241,6 @@ export function CopyLabDetail({
       // edits the founder already typed because a readback failed.
       setLoadFailed(true);
       return { ok: false };
-    } finally {
-      setLoading(false);
     }
   }, [entry, applyResult]);
 
@@ -312,79 +319,125 @@ export function CopyLabDetail({
   const canPublish =
     canMutate && hasUnappliedChanges && validation.ok && pending === null;
 
+  function clearConfirmations(): void {
+    setConfirmingReset(false);
+    setConfirmingRestoreId(null);
+    setConfirmingDiscard(false);
+  }
+
+  const mutationPending = pending !== null;
+
   function requestClose(): void {
+    if (mutationPending || mutationInFlightRef.current) return;
+    clearConfirmations();
     if (hasUnappliedChanges) {
       setConfirmingDiscard(true);
       setFeedback(null);
       setError(null);
       return;
     }
-    setConfirmingDiscard(false);
     setFeedback(null);
     setError(null);
-    setConfirmingReset(false);
     onOpenChange(false);
   }
 
   function discardAndClose(): void {
-    setConfirmingDiscard(false);
+    if (mutationPending || mutationInFlightRef.current) return;
+    clearConfirmations();
     setFeedback(null);
     setError(null);
-    setConfirmingReset(false);
     onOpenChange(false);
+  }
+
+  function requestReset(): void {
+    if (mutationPending || mutationInFlightRef.current) return;
+    clearConfirmations();
+    setFeedback(null);
+    setError(null);
+    setConfirmingReset(true);
+  }
+
+  function requestRestore(historyId: string): void {
+    if (mutationPending || mutationInFlightRef.current) return;
+    clearConfirmations();
+    setFeedback(null);
+    setError(null);
+    if (hasUnappliedChanges) {
+      setConfirmingRestoreId(historyId);
+      return;
+    }
+    void run("restore", () => restoreCopyOverrideAction({ historyId }));
+  }
+
+  function confirmRestore(): void {
+    const historyId = confirmingRestoreId;
+    if (historyId === null || mutationPending || mutationInFlightRef.current) {
+      return;
+    }
+    clearConfirmations();
+    void run("restore", () => restoreCopyOverrideAction({ historyId }));
   }
 
   async function run(
     kind: MutationKind,
     action: () => Promise<ActionResult>,
   ): Promise<void> {
+    // Ref guard closes the pre-render window where two rapid clicks could
+    // otherwise invoke two server mutations.
+    if (mutationInFlightRef.current) return;
+    mutationInFlightRef.current = true;
+    clearConfirmations();
     setPending(kind);
     setError(null);
     setFeedback(null);
-    let result: ActionResult;
     try {
-      // The action returns the service's typed envelope; a non-success is a
-      // real validation/persistence failure and is surfaced, never hidden.
-      result = await action();
-    } catch {
-      result = {
-        success: false,
-        error: {
-          code: "PERSISTENCE_FAILED",
-          message: "تعذر إكمال العملية الآن",
-        },
-      };
-    }
-    if (result.success) {
-      setConfirmingReset(false);
-      const refreshResult = await refresh();
-      setPending(null);
-      if (refreshResult.ok) {
-        setFeedback({
-          kind,
-          readbackSuccess: true,
-          message: getMutationFeedbackText({
-            kind,
-            key: entry.key,
-            readbackSuccess: true,
-            source: refreshResult.source,
-          }),
-        });
-      } else {
-        setFeedback({
-          kind,
-          readbackSuccess: false,
-          message: getMutationFeedbackText({
-            kind,
-            key: entry.key,
-            readbackSuccess: false,
-          }),
-        });
+      let result: ActionResult;
+      try {
+        // The action returns the service's typed envelope; a non-success is a
+        // real validation/persistence failure and is surfaced, never hidden.
+        result = await action();
+      } catch {
+        result = {
+          success: false,
+          error: {
+            code: "PERSISTENCE_FAILED",
+            message: "تعذر إكمال العملية الآن",
+          },
+        };
       }
-      return;
+      if (result.success) {
+        // Pending is intentionally kept through the readback: the editor stays
+        // read-only until the effective state is re-read (or the read fails).
+        const refreshResult = await refresh();
+        if (refreshResult.ok) {
+          setFeedback({
+            kind,
+            readbackSuccess: true,
+            message: getMutationFeedbackText({
+              kind,
+              key: entry.key,
+              readbackSuccess: true,
+              source: refreshResult.source,
+            }),
+          });
+        } else {
+          setFeedback({
+            kind,
+            readbackSuccess: false,
+            message: getMutationFeedbackText({
+              kind,
+              key: entry.key,
+              readbackSuccess: false,
+            }),
+          });
+        }
+        return;
+      }
+      setError(toMutationError(result.error));
+    } finally {
+      mutationInFlightRef.current = false;
+      setPending(null);
     }
-    setPending(null);
-    setError(toMutationError(result.error));
   }
 
   return (
@@ -400,9 +453,11 @@ export function CopyLabDetail({
       open={open}
       onOpenChange={(nextOpen) => {
         if (!nextOpen) {
-          // Swipe/overlay/Escape go through here. Never discard local edits
-          // silently: ask first when the draft differs from the loaded
-          // effective text.
+          // Swipe/overlay/Escape go through here. Never close while a write is
+          // still running (a close/discard must not imply the write was
+          // cancelled), and never discard local edits silently.
+          if (mutationPending || mutationInFlightRef.current) return;
+          clearConfirmations();
           if (hasUnappliedChanges) {
             setConfirmingDiscard(true);
             setFeedback(null);
@@ -411,8 +466,6 @@ export function CopyLabDetail({
           }
           setFeedback(null);
           setError(null);
-          setConfirmingReset(false);
-          setConfirmingDiscard(false);
         }
         onOpenChange(nextOpen);
       }}
@@ -456,14 +509,19 @@ export function CopyLabDetail({
                   entry={entry}
                   draft={draft}
                   onDraftChange={(value) => {
+                    // Guard the handler as well as the DOM control: a programmatic
+                    // change during a mutation must never replace the in-flight
+                    // draft that applyResult is about to read back.
+                    if (mutationPending || mutationInFlightRef.current) return;
                     setDraft(value);
                     setFeedback(null);
                     setError(null);
-                    setConfirmingDiscard(false);
+                    clearConfirmations();
                   }}
                   characters={[...draft].length}
                   validationFailure={validationFailure}
                   hasUnappliedChanges={hasUnappliedChanges}
+                  operationInProgress={mutationPending}
                 />
               ) : null}
             </>
@@ -504,10 +562,8 @@ export function CopyLabDetail({
           {canMutate ? (
             <HistorySection
               items={history}
-              disabled={pending !== null}
-              onRestore={(historyId) =>
-                run("restore", () => restoreCopyOverrideAction({ historyId }))
-              }
+              disabled={mutationPending}
+              onRestore={requestRestore}
             />
           ) : null}
 
@@ -516,6 +572,16 @@ export function CopyLabDetail({
         </div>
 
         <DrawerFooter className="space-y-2">
+          {mutationPending ? (
+            <p
+              role="status"
+              aria-live="polite"
+              className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-xs font-medium leading-relaxed text-amber-700 dark:text-amber-400"
+            >
+              {PENDING_MUTATION_LABELS[pending!]} — لا يمكن تعديل النص أو إغلاق
+              النافذة حتى تكتمل القراءة الراجعة.
+            </p>
+          ) : null}
           {error ? <MutationErrorAlert error={error} /> : null}
           {feedback !== null ? (
             <p
@@ -562,7 +628,7 @@ export function CopyLabDetail({
               ) : null}
 
               {effective.publishedText !== null ? (
-                confirmingReset ? (
+                confirmingReset && !mutationPending ? (
                   <div className="space-y-2 rounded-xl border border-warning/30 bg-warning/5 p-2.5">
                     <p className="text-sm font-medium">
                       تأكيد إعادة التعيين في المخزن؟
@@ -570,6 +636,9 @@ export function CopyLabDetail({
                     <p className="text-muted-foreground text-xs leading-relaxed">
                       يُحذف التجاوز من مخزن المنصة ويعود النص المعتمد إلى
                       الافتراضي في الكود.
+                      {hasUnappliedChanges
+                        ? " وستُفقد تعديلاتك المحلية غير المطبقة على النص الفعلي."
+                        : ""}
                     </p>
                     <div className="flex gap-2">
                       <Button
@@ -608,11 +677,8 @@ export function CopyLabDetail({
                     type="button"
                     variant="outline"
                     className="h-11 w-full"
-                    disabled={pending !== null}
-                    onClick={() => {
-                      setFeedback(null);
-                      setConfirmingReset(true);
-                    }}
+                    disabled={mutationPending}
+                    onClick={requestReset}
                   >
                     <RotateCcwIcon aria-hidden className="size-4" />
                     إعادة التعيين للنص الافتراضي
@@ -622,7 +688,42 @@ export function CopyLabDetail({
             </div>
           ) : null}
 
-          {confirmingDiscard ? (
+          {confirmingRestoreId !== null && !mutationPending ? (
+            <div
+              role="alert"
+              className="space-y-2 rounded-xl border border-warning/30 bg-warning/5 p-3 text-start"
+            >
+              <p className="text-sm font-medium">
+                تأكيد استرجاع نسخة من السجل؟
+              </p>
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                سيستبدل التجاوز المنشور بهذه النسخة، وستُفقد تعديلاتك المحلية
+                غير المطبقة. هل تريد المتابعة؟
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="h-11 flex-1"
+                  disabled={mutationPending}
+                  onClick={confirmRestore}
+                >
+                  تأكيد الاسترجاع
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 flex-1"
+                  disabled={mutationPending}
+                  onClick={() => setConfirmingRestoreId(null)}
+                >
+                  إلغاء
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {confirmingDiscard && !mutationPending ? (
             <div
               role="alert"
               className="space-y-2 rounded-xl border border-warning/30 bg-warning/5 p-3 text-start"
@@ -658,10 +759,11 @@ export function CopyLabDetail({
               type="button"
               variant="outline"
               className="h-11 w-full"
+              disabled={mutationPending}
               onClick={requestClose}
             >
               <XIcon aria-hidden className="size-4" />
-              إغلاق
+              {mutationPending ? "جارٍ التنفيذ…" : "إغلاق"}
             </Button>
           )}
         </DrawerFooter>
@@ -979,6 +1081,7 @@ function CopyEditor({
   characters,
   validationFailure,
   hasUnappliedChanges,
+  operationInProgress,
 }: {
   entry: CopyRegistryEntry;
   draft: string;
@@ -986,6 +1089,7 @@ function CopyEditor({
   characters: number;
   validationFailure: CopyValidationFailure | null;
   hasUnappliedChanges: boolean;
+  operationInProgress: boolean;
 }) {
   const inputId = `copy-lab-editor-${entry.key}`;
   return (
@@ -1009,12 +1113,20 @@ function CopyEditor({
         id={inputId}
         dir="auto"
         value={draft}
+        readOnly={operationInProgress}
+        aria-readonly={operationInProgress}
+        aria-busy={operationInProgress}
         onChange={(event) => onDraftChange(event.target.value)}
         aria-invalid={validationFailure !== null}
         aria-describedby={`${inputId}-hint ${inputId}-dirty`}
       />
       <p id={`${inputId}-dirty`} className="text-xs">
-        {hasUnappliedChanges ? (
+        {operationInProgress ? (
+          <span role="status" className="text-amber-600 dark:text-amber-500">
+            العملية قيد التنفيذ والقراءة الراجعة لم تكتمل — المحرر للقراءة فقط
+            مؤقتاً.
+          </span>
+        ) : hasUnappliedChanges ? (
           <span className="text-amber-600 dark:text-amber-500">
             تعديلات محلية غير مطبقة على النص الفعلي.
           </span>
