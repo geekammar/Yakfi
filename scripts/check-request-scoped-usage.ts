@@ -219,8 +219,9 @@ async function main(): Promise<void> {
       error: { code: "PERSISTENCE_FAILED", message: "policy unavailable" },
     })) as never,
   });
-  const policyNoCall =
-    await policyFailureAi.respondWithExecution!(request("REQUEST_POLICY"));
+  const policyNoCall = await policyFailureAi.respondWithExecution!(
+    request("REQUEST_POLICY"),
+  );
   check(
     "policy failure is an explicit request-scoped no-call",
     policyNoCall.response === null &&

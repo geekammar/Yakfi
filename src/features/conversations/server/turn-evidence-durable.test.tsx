@@ -236,8 +236,7 @@ async function runTurn(
               response: options.execution!.response,
               providerName: options.execution!.providerName ?? "fake-ai",
               telemetry: options.execution!.telemetry ?? null,
-              policyUnavailable:
-                options.execution!.policyUnavailable ?? false,
+              policyUnavailable: options.execution!.policyUnavailable ?? false,
               error:
                 options.execution!.error ??
                 (options.execution!.response
