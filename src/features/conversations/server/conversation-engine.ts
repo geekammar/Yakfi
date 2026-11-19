@@ -149,7 +149,10 @@ import {
   derivePendingClarification,
   derivePendingContinuation,
 } from "@/features/conversations/server/clarification";
-import type { ConversationAi } from "@/features/conversations/server/conversation-ai";
+import type {
+  ConversationAi,
+  ConversationAiExecution,
+} from "@/features/conversations/server/conversation-ai";
 import {
   SAFE_HANDOFF_REPLIES,
   buildBusinessIdentityContent,
@@ -234,9 +237,10 @@ import type {
   KnowledgeGapCategory,
   RecordUsageDto,
 } from "@/lib/validation";
+import type { AiFactoryDeps } from "@/server/integrations/ai/factory";
 import {
-  POLICY_UNAVAILABLE_AI_PROVIDER,
   createPolicyBackedAi,
+  isPolicyUnavailableAi,
 } from "@/server/integrations/ai/factory";
 import { JEV_DETERMINISTIC_PROVIDER } from "@/server/integrations/ai/jev-strategy";
 import type {
@@ -295,91 +299,86 @@ function getEnvVar(name: string): string | undefined {
   return process.env[name];
 }
 
-// Last telemetry from the most recent LLM turn — surfaced to the
-// engine's readAiTelemetry (AI_TURN rich record). Null when the last
-// turn used the deterministic fallback or had no telemetry.
-let lastTelemetryValue: AiTelemetry | null = null;
-let lastProviderNameInner = "policy-backed";
+/**
+ * Build the production policy-backed assistant as a STATELESS wrapper.
+ *
+ * Every invocation resolves its own live AI and returns a request-scoped
+ * `ConversationAiExecution`. There is deliberately no module-level "last
+ * provider" / "last telemetry" state: concurrent inbound turns must never
+ * read another request's response, provider, tokens, attempts or failure.
+ */
+export function createPolicyBackedConversationAi(
+  deps: AiFactoryDeps,
+): ConversationAi {
+  return {
+    // Stable implementation identity, not a provider result. Per-turn
+    // provider attribution comes from `respondWithExecution`.
+    providerName: "policy-backed",
+    async respond(request: AiRequest): Promise<AiResponse> {
+      const execution = await executePolicyBackedRequest(deps, request);
+      if (!execution.response) {
+        throw execution.error instanceof Error
+          ? execution.error
+          : new Error("AI_FAILURE");
+      }
+      return execution.response;
+    },
+    respondWithExecution(
+      request: AiRequest,
+    ): Promise<ConversationAiExecution> {
+      return executePolicyBackedRequest(deps, request);
+    },
+  };
+}
 
-const policyBackedAi: ConversationAi = {
-  get providerName() {
-    return lastProviderNameInner;
-  },
-  async respond(request: AiRequest) {
-    const liveAi = await createPolicyBackedAi({
-      getEnvVar,
-      fetchImpl: globalThis.fetch as unknown as typeof fetch,
-    });
-    // Keep providerName honest for deferred / handoff reporting
-    lastProviderNameInner = liveAi.providerName;
-    const maybe = liveAi as unknown as { getLastTelemetry?: () => unknown };
-    let result: AiResponse;
-    try {
-      result = await liveAi.respond(request);
-    } catch (error) {
-      // Preserve telemetry even on controlled failure (engine maps
-      // null → NEED_HUMAN). Capture before re-throwing.
-      if (typeof maybe.getLastTelemetry === "function") {
-        try {
-          const t = maybe.getLastTelemetry();
-          if (
-            t &&
-            typeof t === "object" &&
-            "finalProvider" in (t as Record<string, unknown>)
-          ) {
-            lastTelemetryValue = t as AiTelemetry;
-            if (lastTelemetryValue.finalProvider)
-              lastProviderNameInner = lastTelemetryValue.finalProvider;
-          } else {
-            // Never reuse an earlier turn's telemetry for this failure.
-            lastTelemetryValue = null;
-          }
-        } catch {
-          // telemetry is best-effort
-          lastTelemetryValue = null;
-        }
-      } else {
-        // Never reuse an earlier turn's telemetry for this failure.
-        lastTelemetryValue = null;
-      }
-      throw error;
-    }
-    if (typeof maybe.getLastTelemetry === "function") {
-      try {
-        const t = maybe.getLastTelemetry();
-        if (
-          t &&
-          typeof t === "object" &&
-          "finalProvider" in (t as Record<string, unknown>)
-        ) {
-          lastTelemetryValue = t as AiTelemetry;
-          if (
-            lastTelemetryValue.finalProvider &&
-            lastTelemetryValue.finalProvider !== "deterministic-bypass"
-          ) {
-            lastProviderNameInner = lastTelemetryValue.finalProvider;
-          } else if (
-            lastTelemetryValue.finalProvider === "deterministic-bypass"
-          ) {
-            lastProviderNameInner = "deterministic-bypass";
-          }
-        } else {
-          lastTelemetryValue = null;
-        }
-      } catch {
-        lastTelemetryValue = null;
-      }
-    } else {
-      lastTelemetryValue = null;
-    }
-    return result;
-  },
-  // Exposed for the engine's readAiTelemetry (LLM path); deterministic
-  // fallback has no telemetry.
-  getLastTelemetry(): AiTelemetry | null {
-    return lastTelemetryValue;
-  },
-} as unknown as ConversationAi & { getLastTelemetry(): AiTelemetry | null };
+async function executePolicyBackedRequest(
+  deps: AiFactoryDeps,
+  request: AiRequest,
+): Promise<ConversationAiExecution> {
+  let liveAi: ConversationAi;
+  try {
+    liveAi = await createPolicyBackedAi(deps);
+  } catch (error) {
+    // Policy/adapter construction failed before any execution result existed.
+    // Keep the evidence UNKNOWN (never force zero) and let the engine fail safe.
+    return {
+      response: null,
+      providerName: "policy-backed",
+      telemetry: null,
+      policyUnavailable: false,
+      error,
+    };
+  }
+
+  try {
+    const response = await liveAi.respond(request);
+    const telemetry = readAiTelemetry(liveAi);
+    return {
+      response,
+      providerName: telemetry?.finalProvider ?? liveAi.providerName,
+      telemetry,
+      policyUnavailable: false,
+      error: null,
+    };
+  } catch (error) {
+    const telemetry = readAiTelemetry(liveAi);
+    const policyUnavailable = isPolicyUnavailableAi(liveAi);
+    return {
+      response: null,
+      providerName: policyUnavailable
+        ? liveAi.providerName
+        : (telemetry?.finalProvider ?? liveAi.providerName),
+      telemetry: policyUnavailable ? null : telemetry,
+      policyUnavailable,
+      error,
+    };
+  }
+}
+
+const policyBackedAi = createPolicyBackedConversationAi({
+  getEnvVar,
+  fetchImpl: globalThis.fetch as unknown as typeof fetch,
+});
 
 export type ConversationEngineDeps = {
   businessRepository: Pick<BusinessRepository, "findByWhatsappNumber"> &
@@ -882,6 +881,55 @@ function readAiTelemetry(ai: ConversationAi): AiTelemetry | null {
     return null;
   }
   return null;
+}
+
+/**
+ * Execute ONE assistant invocation and return its request-scoped result.
+ *
+ * Prefers the explicit `respondWithExecution` boundary, so no routing,
+ * counter, usage or attribution decision can read shared mutable state from a
+ * different request. Legacy implementations fall back to `respond` plus their
+ * own telemetry getter; the policy-unavailable marker is still explicit, never
+ * inferred from a mutable provider name.
+ */
+async function executeConversationAi(
+  ai: ConversationAi,
+  request: AiRequest,
+): Promise<ConversationAiExecution> {
+  if (typeof ai.respondWithExecution === "function") {
+    try {
+      return await ai.respondWithExecution(request);
+    } catch (error) {
+      return {
+        response: null,
+        providerName: ai.providerName,
+        telemetry: null,
+        policyUnavailable: isPolicyUnavailableAi(ai),
+        error,
+      };
+    }
+  }
+
+  try {
+    const response = await ai.respond(request);
+    const policyUnavailable = isPolicyUnavailableAi(ai);
+    return {
+      response,
+      providerName: ai.providerName,
+      telemetry: policyUnavailable ? null : readAiTelemetry(ai),
+      policyUnavailable,
+      error: null,
+    };
+  } catch (error) {
+    const policyUnavailable = isPolicyUnavailableAi(ai);
+    return {
+      response: null,
+      providerName: ai.providerName,
+      telemetry: policyUnavailable ? null : readAiTelemetry(ai),
+      policyUnavailable,
+      error,
+    };
+  }
 }
 
 /**
@@ -3478,18 +3526,25 @@ async function recordKnowledgeGapOffPath(
 export function resolveTurnCounters(params: {
   deterministicBypass: boolean;
   providerName: string;
+  /** Explicit request-scoped proof that policy resolution failed before dispatch. */
+  policyUnavailable?: boolean;
   turnTelemetry: AiTelemetry | null;
 }): {
   providerAttempts: number | null;
   modelCallCount: number;
 } {
-  const { deterministicBypass, providerName, turnTelemetry } = params;
+  const {
+    deterministicBypass,
+    providerName,
+    policyUnavailable = false,
+    turnTelemetry,
+  } = params;
   const jevCallSpent = !!turnTelemetry?.jevDecision?.semantic?.jevCallSpent;
 
   if (
     deterministicBypass ||
+    policyUnavailable ||
     providerName === "deterministic" ||
-    providerName === POLICY_UNAVAILABLE_AI_PROVIDER ||
     turnTelemetry?.finalProvider === "deterministic-bypass"
   ) {
     return {
@@ -3770,6 +3825,12 @@ async function runInboundTurn(
   }
   const inbound: InboundMessageInput = parsed.data;
 
+  // REQUEST-SCOPED assistant identity. Protocol/no-call branches report the
+  // stable implementation identity; after an AI invocation this is replaced
+  // by the provider identity carried on THAT request's execution result.
+  let aiProviderName = deps.ai.providerName;
+  let aiPolicyUnavailable = false;
+
   // PROMPT-AI-OPS-22 — ONE correlation id for the whole turn, born before any
   // decision and carried on every downstream observation of this turn. Opaque,
   // random, never derived from content.
@@ -3984,7 +4045,7 @@ async function runInboundTurn(
         // A staff-owned thread is not an assistant-initiated handoff — the
         // typed cause taxonomy describes why the ASSISTANT needed a human.
         handoffCause: null,
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: aiProviderName,
         delivery: null,
       };
     }
@@ -4418,7 +4479,7 @@ async function runInboundTurn(
           intent: "AVAILABILITY",
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: aiProviderName,
           delivery,
         };
       } else {
@@ -4487,7 +4548,7 @@ async function runInboundTurn(
           intent: "FAQ",
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: aiProviderName,
           delivery,
         };
       }
@@ -4550,7 +4611,7 @@ async function runInboundTurn(
           intent: "GREETING",
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: aiProviderName,
           delivery,
         };
       } else if (offerReply.action === "continue") {
@@ -4657,7 +4718,7 @@ async function runInboundTurn(
             intent: "BOOKING",
             conversationStatus: "AI_ACTIVE",
             handoffCause: null,
-            assistantProvider: deps.ai.providerName,
+            assistantProvider: aiProviderName,
             delivery,
           };
         }
@@ -4841,7 +4902,7 @@ async function runInboundTurn(
               intent: "AVAILABILITY",
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: aiProviderName,
               delivery,
             };
           }
@@ -5027,7 +5088,7 @@ async function runInboundTurn(
               intent: "AVAILABILITY",
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: aiProviderName,
               delivery,
             };
           }
@@ -5194,7 +5255,7 @@ async function runInboundTurn(
         intent: "FAQ",
         conversationStatus: "AI_ACTIVE",
         handoffCause: null,
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: aiProviderName,
         delivery,
       };
     } else if (offerReply.kind === "service_detail_action") {
@@ -5317,7 +5378,7 @@ async function runInboundTurn(
           intent: "FAQ",
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: aiProviderName,
           delivery,
         };
       } else {
@@ -5373,7 +5434,7 @@ async function runInboundTurn(
           intent: "GREETING",
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: aiProviderName,
           delivery,
         };
       }
@@ -5557,7 +5618,7 @@ async function runInboundTurn(
         intent: "AVAILABILITY",
         conversationStatus: "AI_ACTIVE",
         handoffCause: null,
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: aiProviderName,
         delivery,
       };
     } else if (offerReply.kind === "date_invalid_index") {
@@ -5589,7 +5650,7 @@ async function runInboundTurn(
         intent: "AVAILABILITY",
         conversationStatus: "AI_ACTIVE",
         handoffCause: null,
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: aiProviderName,
         delivery,
       };
     } else if (offerReply.kind === "provider") {
@@ -5671,7 +5732,7 @@ async function runInboundTurn(
         intent: "AVAILABILITY",
         conversationStatus: "AI_ACTIVE",
         handoffCause: null,
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: aiProviderName,
         delivery,
       };
     } else if (offerReply.kind === "service_invalid_index") {
@@ -5703,7 +5764,7 @@ async function runInboundTurn(
         intent: "BOOKING",
         conversationStatus: "AI_ACTIVE",
         handoffCause: null,
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: aiProviderName,
         delivery,
       };
     } else if (offerReply.kind === "stale") {
@@ -5757,7 +5818,7 @@ async function runInboundTurn(
           intent: "BOOKING",
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: aiProviderName,
           delivery,
         };
       }
@@ -5889,7 +5950,7 @@ async function runInboundTurn(
         intent: "BOOKING",
         conversationStatus: "AI_ACTIVE",
         handoffCause: null,
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: aiProviderName,
         delivery,
       };
     } else {
@@ -5953,7 +6014,7 @@ async function runInboundTurn(
           intent: "GREETING",
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: aiProviderName,
           delivery,
         };
       }
@@ -6009,7 +6070,7 @@ async function runInboundTurn(
           intent: "GREETING",
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: aiProviderName,
           delivery,
         };
       }
@@ -6127,7 +6188,7 @@ async function runInboundTurn(
         intent: "GREETING",
         conversationStatus: "AI_ACTIVE",
         handoffCause: null,
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: aiProviderName,
         delivery,
       };
     }
@@ -6210,23 +6271,16 @@ async function runInboundTurn(
     let successAttempt: AiTelemetryAttempt | undefined;
     let lastAttempt: AiTelemetryAttempt | undefined;
     if (!turn) {
-      try {
-        turn = await deps.ai.respond(aiRequest);
-      } catch {
-        turn = null;
-      }
-      turnTelemetry = readAiTelemetry(deps.ai);
-      if (deps.ai.providerName === POLICY_UNAVAILABLE_AI_PROVIDER) {
-        // A policy-unavailable turn never had a provider execution. Ignore any
-        // stale/foreign telemetry so this request cannot borrow another
-        // request's attempts.
-        turnTelemetry = null;
-      }
+      const execution = await executeConversationAi(deps.ai, aiRequest);
+      turn = execution.response;
+      turnTelemetry = execution.telemetry;
+      aiProviderName = execution.providerName;
+      aiPolicyUnavailable = execution.policyUnavailable;
       const telemetry = turnTelemetry;
       const jevCallSpent = !!telemetry?.jevDecision?.semantic?.jevCallSpent;
       const isNoServingCall =
-        deps.ai.providerName === "deterministic" ||
-        deps.ai.providerName === POLICY_UNAVAILABLE_AI_PROVIDER ||
+        aiPolicyUnavailable ||
+        aiProviderName === "deterministic" ||
         telemetry?.finalProvider === "deterministic-bypass" ||
         (telemetry?.finalProvider === JEV_DETERMINISTIC_PROVIDER &&
           !jevCallSpent);
@@ -6244,7 +6298,7 @@ async function runInboundTurn(
           businessId: business.id,
           kind: "AI_TURN",
           conversationId: conversation.id,
-          provider: telemetry?.finalProvider ?? deps.ai.providerName,
+          provider: telemetry?.finalProvider ?? aiProviderName,
           model: (successAttempt?.model ??
             telemetry?.finalModel ??
             undefined) as string | undefined,
@@ -6284,11 +6338,11 @@ async function runInboundTurn(
     //     compatibility bridge from the existing intent + action.
     const turnRouting: AiRoutingDecision = deterministicBypass
       ? "DETERMINISTIC_BYPASS"
-      : deps.ai.providerName === POLICY_UNAVAILABLE_AI_PROVIDER
+      : aiPolicyUnavailable
         ? "NONE"
         : turnTelemetry?.finalProvider === JEV_DETERMINISTIC_PROVIDER
           ? "JEV"
-          : deps.ai.providerName === "deterministic"
+          : aiProviderName === "deterministic"
             ? "DETERMINISTIC"
             : "LLM";
 
@@ -6296,9 +6350,10 @@ async function runInboundTurn(
     const isGenerativeStructuredTurn =
       effectiveCapability === "structured_turn" &&
       !deterministicBypass &&
+      !aiPolicyUnavailable &&
       turnRouting === "LLM" &&
       turnTelemetry?.finalProvider !== "deterministic" &&
-      deps.ai.providerName !== "deterministic";
+      aiProviderName !== "deterministic";
 
     // CORE-03D2: On structured generative turns, a valid explicit safetyAssessment
     // is strictly required before ordinary structured execution can proceed.
@@ -6343,7 +6398,8 @@ async function runInboundTurn(
     // Disentangles physical HTTP attempts across wire calls from logical serving activity.
     const { providerAttempts, modelCallCount } = resolveTurnCounters({
       deterministicBypass,
-      providerName: deps.ai.providerName,
+      providerName: aiProviderName,
+      policyUnavailable: aiPolicyUnavailable,
       turnTelemetry,
     });
 
@@ -6355,7 +6411,7 @@ async function runInboundTurn(
             provider:
               a.provider ??
               turnTelemetry?.finalProvider ??
-              deps.ai.providerName,
+              aiProviderName,
             model: a.model ?? undefined,
             status: a.outcome === "SUCCESS" ? "SUCCESS" : "FAILURE",
             ...(a.httpAttempts !== undefined
@@ -6437,7 +6493,7 @@ async function runInboundTurn(
       response: validated,
       provider: deterministicBypass
         ? "deterministic-bypass"
-        : (turnTelemetry?.finalProvider ?? deps.ai.providerName),
+        : (turnTelemetry?.finalProvider ?? aiProviderName),
       model: turnTelemetry?.finalModel ?? null,
       fallbackUsed: turnTelemetry?.fallbackUsed ?? false,
       retryCount: turnTelemetry?.retryTrace
@@ -6558,7 +6614,7 @@ async function runInboundTurn(
         intent: null,
         conversationStatus: "NEED_HUMAN",
         handoffCause: failureCause,
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: aiProviderName,
         observability: turnObservability,
         delivery,
       };
@@ -6620,7 +6676,7 @@ async function runInboundTurn(
           resolvedTurn.precedenceRule === "SAFETY_RESTRICTED"
             ? "SENSITIVE_OR_RESTRICTED"
             : "CUSTOMER_REQUESTED_HUMAN",
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: aiProviderName,
         observability: turnObservability,
         delivery,
       };
@@ -6674,7 +6730,7 @@ async function runInboundTurn(
         intent: validated.intent,
         conversationStatus: "AI_ACTIVE",
         handoffCause: null,
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: aiProviderName,
         observability: turnObservability,
         delivery,
       };
@@ -6842,7 +6898,7 @@ async function runInboundTurn(
               intent: validated.intent,
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: aiProviderName,
               delivery,
             };
           }
@@ -6913,7 +6969,7 @@ async function runInboundTurn(
               intent: validated.intent,
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: aiProviderName,
               delivery,
             };
           }
@@ -6981,7 +7037,7 @@ async function runInboundTurn(
               intent: validated.intent,
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: aiProviderName,
               delivery,
             };
           }
@@ -7444,7 +7500,7 @@ async function runInboundTurn(
               intent: validated.intent,
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: aiProviderName,
               delivery,
             };
           }
@@ -7515,7 +7571,7 @@ async function runInboundTurn(
               intent: validated.intent,
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: aiProviderName,
               delivery,
             };
           }
@@ -7583,7 +7639,7 @@ async function runInboundTurn(
               intent: validated.intent,
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: aiProviderName,
               delivery,
             };
           }
@@ -7983,7 +8039,7 @@ async function runInboundTurn(
             intent: validated.intent,
             conversationStatus: "AI_ACTIVE",
             handoffCause: null,
-            assistantProvider: deps.ai.providerName,
+            assistantProvider: aiProviderName,
             observability: turnObservability,
             delivery,
           };
@@ -8037,7 +8093,7 @@ async function runInboundTurn(
             intent: validated.intent,
             conversationStatus: "AI_ACTIVE",
             handoffCause: null,
-            assistantProvider: deps.ai.providerName,
+            assistantProvider: aiProviderName,
             observability: turnObservability,
             delivery,
           };
@@ -8099,7 +8155,7 @@ async function runInboundTurn(
               intent: validated.intent,
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: aiProviderName,
               observability: {
                 ...turnObservability,
                 turnPlan: {
@@ -8156,7 +8212,7 @@ async function runInboundTurn(
               intent: validated.intent,
               conversationStatus: "AI_ACTIVE",
               handoffCause: null,
-              assistantProvider: deps.ai.providerName,
+              assistantProvider: aiProviderName,
               observability: {
                 ...turnObservability,
                 turnPlan: {
@@ -8498,7 +8554,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: aiProviderName,
           observability: clarifyObservability,
           delivery,
         };
@@ -8557,7 +8613,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "NEED_HUMAN",
           handoffCause: eligibilityCause,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: aiProviderName,
           observability: turnObservability,
           delivery,
         };
@@ -8631,7 +8687,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: aiProviderName,
           observability: turnObservability,
           delivery,
         };
@@ -8784,7 +8840,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: aiProviderName,
           observability: turnObservability,
           delivery,
         };
@@ -8933,7 +8989,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: aiProviderName,
           observability: turnObservability,
           delivery,
         };
@@ -8986,7 +9042,7 @@ async function runInboundTurn(
           conversationStatus: "NEED_HUMAN",
           // CORE-02 blocked the booking — an authoritative domain constraint.
           handoffCause: "DOMAIN_REQUIRES_HUMAN",
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: aiProviderName,
           observability: turnObservability,
           delivery,
         };
@@ -9053,7 +9109,7 @@ async function runInboundTurn(
             intent: validated.intent,
             conversationStatus: "AI_ACTIVE",
             handoffCause: null,
-            assistantProvider: deps.ai.providerName,
+            assistantProvider: aiProviderName,
             observability: turnObservability,
             delivery,
           };
@@ -9093,7 +9149,7 @@ async function runInboundTurn(
           // CORE-02 found no bookable options — a domain constraint the
           // assistant cannot resolve autonomously.
           handoffCause: "DOMAIN_REQUIRES_HUMAN",
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: aiProviderName,
           observability: turnObservability,
           delivery,
         };
@@ -9198,7 +9254,7 @@ async function runInboundTurn(
         intent: validated.intent,
         conversationStatus: "AI_ACTIVE",
         handoffCause: null,
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: aiProviderName,
         observability: turnObservability,
         delivery,
       };
@@ -9310,7 +9366,7 @@ async function runInboundTurn(
           intent: validated.intent,
           conversationStatus: "AI_ACTIVE",
           handoffCause: null,
-          assistantProvider: deps.ai.providerName,
+          assistantProvider: aiProviderName,
           observability: preserveObservability,
           delivery,
         };
@@ -9363,7 +9419,7 @@ async function runInboundTurn(
         // the assistant could not justify the answer from authoritative
         // sources, which is a policy refusal, never a knowledge gap.
         handoffCause: "POLICY_REFUSED",
-        assistantProvider: deps.ai.providerName,
+        assistantProvider: aiProviderName,
         observability: turnObservability,
         delivery,
       };
@@ -9576,7 +9632,7 @@ async function runInboundTurn(
         validated.action === "booking_handoff"
           ? "DOMAIN_REQUIRES_HUMAN"
           : contractHandoffReasonToCause(validated.handoffReason),
-      assistantProvider: deps.ai.providerName,
+      assistantProvider: aiProviderName,
       observability: turnObservability,
       delivery,
     };

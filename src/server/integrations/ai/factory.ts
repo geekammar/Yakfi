@@ -11,7 +11,10 @@
  * - Secrets are env-names only via `secretRefFor(provider)` — never keys.
  * - No DB access outside `getAiPolicy`; no Domain/Engine changes.
  */
-import type { ConversationAi } from "@/features/conversations/server/conversation-ai";
+import type {
+  ConversationAi,
+  ConversationAiExecution,
+} from "@/features/conversations/server/conversation-ai";
 import { getAiPolicy } from "@/features/platform/server/ai-policy-service";
 import type { EffectiveAiPolicy } from "@/lib/validation/platform";
 
@@ -148,6 +151,24 @@ export function adaptersFromEffectivePolicy(
  */
 export const POLICY_UNAVAILABLE_AI_PROVIDER = "policy-unavailable";
 
+/** The bounded unavailable implementation, explicitly marked as no-call. */
+export type PolicyUnavailableConversationAi = ConversationAi & {
+  readonly policyUnavailable: true;
+};
+
+/**
+ * Explicit marker guard for the policy-unavailable implementation. The
+ * engine must NOT infer a no-call failure from a mutable provider name.
+ */
+export function isPolicyUnavailableAi(
+  ai: ConversationAi,
+): ai is PolicyUnavailableConversationAi {
+  return (
+    (ai as { readonly policyUnavailable?: unknown }).policyUnavailable ===
+    true
+  );
+}
+
 /**
  * A fail-closed ConversationAi used when the platform policy cannot be
  * resolved (read threw, persistence failed, or the stored policy is invalid).
@@ -159,11 +180,21 @@ export const POLICY_UNAVAILABLE_AI_PROVIDER = "policy-unavailable";
  * (`validated === null` → AI_FAILURE / NEED_HUMAN + the existing safe
  * acknowledgment). No provider or JEV request is constructed or made.
  */
-export function createPolicyUnavailableAi(): ConversationAi {
+export function createPolicyUnavailableAi(): PolicyUnavailableConversationAi {
   return {
     providerName: POLICY_UNAVAILABLE_AI_PROVIDER,
+    policyUnavailable: true,
     async respond(): Promise<never> {
       throw new Error("AI_POLICY_UNAVAILABLE");
+    },
+    async respondWithExecution(): Promise<ConversationAiExecution> {
+      return {
+        response: null,
+        providerName: POLICY_UNAVAILABLE_AI_PROVIDER,
+        telemetry: null,
+        policyUnavailable: true,
+        error: new Error("AI_POLICY_UNAVAILABLE"),
+      };
     },
   };
 }

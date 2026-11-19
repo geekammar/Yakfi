@@ -33,6 +33,7 @@ import {
   type ConversationAi,
 } from "../src/features/conversations/server/conversation-ai";
 import {
+  createPolicyBackedConversationAi,
   receiveInboundMessage,
   type InboundSuccess,
 } from "../src/features/conversations/server/conversation-engine";
@@ -42,10 +43,7 @@ import {
   withPresentedOffer,
 } from "../src/features/conversations/server/conversation-state";
 import type { EffectiveAiPolicy } from "../src/lib/validation/platform";
-import {
-  POLICY_UNAVAILABLE_AI_PROVIDER,
-  createPolicyBackedAi,
-} from "../src/server/integrations/ai/factory";
+import { POLICY_UNAVAILABLE_AI_PROVIDER } from "../src/server/integrations/ai/factory";
 
 type Check = { label: string; pass: boolean };
 
@@ -152,7 +150,7 @@ async function buildUnavailableAi(
   failure: PolicyFailureCase,
 ): Promise<{ ai: ConversationAi; fetchCalls: () => number }> {
   const counter = countingFetch(200, openAiEnvelope(validReply()));
-  const ai = await createPolicyBackedAi({
+  const ai = createPolicyBackedConversationAi({
     getEnvVar: offlineEnv,
     fetchImpl: counter.fetchImpl,
     getAiPolicyImpl: failure.read as never,
@@ -199,9 +197,21 @@ async function main(): Promise<void> {
   // ── 1–4. Every failure mode + a structured free-form booking request ──────
   for (const [index, failure] of POLICY_FAILURES.entries()) {
     const { ai, fetchCalls } = await buildUnavailableAi(failure);
+    const execution = await ai.respondWithExecution?.({
+      message: BOOKING_MESSAGE,
+      conversationStatus: "AI_ACTIVE",
+      recentMessages: [],
+      businessName: "عيادة النور لطب الأسنان",
+      services: [],
+      faqs: [],
+    });
     check(
-      `1.${index + 1} ${failure.label} → bounded unavailable assistant (not lexical)`,
-      ai.providerName === POLICY_UNAVAILABLE_AI_PROVIDER,
+      `1.${index + 1} ${failure.label} → request-scoped unavailable result (not lexical)`,
+      execution?.response === null &&
+        execution.providerName === POLICY_UNAVAILABLE_AI_PROVIDER &&
+        execution.telemetry === null &&
+        execution.policyUnavailable === true &&
+        fetchCalls() === 0,
     );
 
     let rejected = false;
@@ -312,7 +322,7 @@ async function main(): Promise<void> {
       secondary: null,
       openRouterProviderOnly: null,
     };
-    const ai = await createPolicyBackedAi({
+    const ai = createPolicyBackedConversationAi({
       getEnvVar: offlineEnv,
       fetchImpl: counter.fetchImpl,
       getAiPolicyImpl: (async () => ({
@@ -336,7 +346,7 @@ async function main(): Promise<void> {
 
     check(
       "6a valid policy → unchanged structured provider call and AI_ACTIVE reply",
-      ai.providerName === "openrouter" &&
+      ai.providerName === "policy-backed" &&
         counter.calls === 1 &&
         result.ok === true &&
         result.assistantAction === "AI_REPLY" &&
@@ -363,7 +373,7 @@ async function main(): Promise<void> {
       secondary: null,
       openRouterProviderOnly: null,
     };
-    const ai = await createPolicyBackedAi({
+    const ai = createPolicyBackedConversationAi({
       getEnvVar: offlineEnv,
       fetchImpl: counter.fetchImpl,
       getAiPolicyImpl: (async () => ({
@@ -508,65 +518,6 @@ async function main(): Promise<void> {
           (message) => message.content !== SAFE_HANDOFF_REPLIES.INVALID_OUTPUT,
         ) &&
         fetchCalls() === 0,
-    );
-  }
-
-  // ── 9. No stale/foreign telemetry is reused for the no-call failure ───────
-  {
-    const staleTelemetry = {
-      attempts: [
-        {
-          provider: "openrouter",
-          model: "stale-model",
-          latencyMs: 1,
-          status: "FAILURE" as const,
-          errorCode: "PERMANENT" as const,
-          httpAttempts: 1,
-        },
-      ],
-      fallbackUsed: false,
-      finalProvider: "openrouter",
-      finalModel: "stale-model",
-      finalStatus: "FAILURE" as const,
-      totalHttpAttempts: 1,
-    };
-    const unavailableWithStaleTelemetry: ConversationAi & {
-      getLastTelemetry: () => typeof staleTelemetry;
-    } = {
-      providerName: POLICY_UNAVAILABLE_AI_PROVIDER,
-      async respond(): Promise<never> {
-        throw new Error("AI_POLICY_UNAVAILABLE");
-      },
-      getLastTelemetry: () => staleTelemetry,
-    };
-    const harness = createPlaygroundHarness({ channel: "WHATSAPP" });
-    const usage: Array<Record<string, unknown>> = [];
-    harness.deps.ai = unavailableWithStaleTelemetry;
-    harness.deps.usageRepository = {
-      record: async (record: Record<string, unknown>) => {
-        usage.push(record);
-        return { id: `usage-${usage.length}` };
-      },
-    } as never;
-
-    const result = (await receiveInboundMessage(harness.deps, {
-      to: harness.business.whatsappNumber ?? "+201001111111",
-      from: "+201011112222",
-      text: BOOKING_MESSAGE,
-      receivedAt: harness.getVirtualNow().toISOString(),
-      externalId: "policy-failure-stale-telemetry",
-    })) as InboundSuccess;
-
-    check(
-      "9 stale/foreign telemetry is never reused for a policy-unavailable turn",
-      result.ok === true &&
-        result.handoffCause === "AI_FAILURE" &&
-        result.observability?.routingDecision === "NONE" &&
-        result.observability?.providerAttempts === 0 &&
-        result.observability?.modelCallCount === 0 &&
-        result.observability?.providerStatus === "NOT_CALLED" &&
-        (result.observability?.executionAttempts ?? null) === null &&
-        usage.filter((record) => record.kind === "AI_TURN").length === 0,
     );
   }
 

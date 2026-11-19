@@ -64,12 +64,18 @@ jobs:
           pnpm test:health-readonly
           pnpm check:provider-failure-lexical-authority
           pnpm check:policy-failure
+          pnpm check:policy-failure-scope
 
       - name: AI prompt contract check
         run: pnpm check:ai-prompts
 
       - name: Setup local environment
         run: node scripts/setup-env.mjs
+
+      - name: TEMP capture prettier diff
+        run: |
+          pnpm exec prettier --write scripts/check-policy-failure-fail-closed.ts scripts/check-policy-failure-request-scope.ts src/features/conversations/server/conversation-ai.ts src/features/conversations/server/conversation-engine.ts src/server/integrations/ai/factory.ts
+          git diff -- scripts/check-policy-failure-fail-closed.ts scripts/check-policy-failure-request-scope.ts src/features/conversations/server/conversation-ai.ts src/features/conversations/server/conversation-engine.ts src/server/integrations/ai/factory.ts
 
       - name: Verify code quality (lint, typecheck, format, build)
         run: pnpm verify

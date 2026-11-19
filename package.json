@@ -19,6 +19,7 @@
     "check:assistant-settings": "tsx scripts/check-assistant-settings.ts",
     "check:policy": "tsx scripts/check-ai-policy.ts",
     "check:policy-failure": "tsx scripts/check-policy-failure-fail-closed.ts",
+    "check:policy-failure-scope": "tsx scripts/check-policy-failure-request-scope.ts",
     "check:knowledge-visibility": "tsx scripts/check-ai-knowledge-visibility.ts",
     "check:ai-context-builder": "tsx scripts/check-ai-context-builder.ts",
     "check:ai-disclosure": "tsx scripts/check-ai-disclosure.ts",
