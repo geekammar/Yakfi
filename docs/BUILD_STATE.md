@@ -7,8 +7,11 @@
   that merge. Read-only Render checks at `2026-11-19T23:31Z` still reported the
   prior deployment `fdf8e56` / `0.79.20` with `/api/health/live` and
   `/api/health` HTTP `200`, `deploymentReady=true`, `database=connected`,
-  `missingEnvVars=[]`. The `0.79.21` deployment was therefore **pending** at
-  that observation; this session did not deploy.
+  `missingEnvVars=[]`; the `0.79.21` deployment was **pending** then and was
+  not triggered manually. At `2026-11-19T23:37Z` automation completed: both
+  health endpoints reported version `0.79.21`, exact commit `9187655`, HTTP
+  `200`, `deploymentReady=true`, `database=connected`,
+  `missingEnvVars=[]`.
 - **PR #88 recovered, not recreated:** branch
   `feat/durable-turn-usage-cost-evidence` was merged with current `main`
   non-destructively (no reset/force-push). The existing Draft PR remains the
@@ -43,7 +46,6 @@
   Telegram/customer send. Crash-before-turn-completion, invoice reconciliation
   and a global enforceable spend cap remain open. Required CI on the final PR
   HEAD is the verification authority.
-
 
 ## AI policy-resolution failure must fail closed (Draft PR, v0.79.21) — 19 November 2026
 

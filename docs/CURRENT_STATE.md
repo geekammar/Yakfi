@@ -22,13 +22,16 @@
   telemetry and an explicit `policyUnavailable` marker from the same
   invocation. Valid-policy, real provider-failure, `/start` and valid callback
   behavior are preserved.
-- **Read-only Render observation at `2026-11-19T23:31Z`:** `/api/health/live`
-  and `/api/health` returned HTTP `200` with version `0.79.20`, exact commit
-  `fdf8e56dad5c7bc4e5ff1f35968dd61b4ade5a6b` (PR #94), environment
-  `production`, `deploymentReady=true`, `database=connected`,
-  `missingEnvVars=[]`. The `0.79.21` deployment was **pending** at that
-  observation; it was not triggered manually. This is readiness evidence, not
-  live product acceptance.
+- **Read-only Render verification:** at `2026-11-19T23:31Z` the service still
+  reported the prior `0.79.20` / `fdf8e56` deployment (HTTP `200`,
+  `deploymentReady=true`, `database=connected`, `missingEnvVars=[]`), so the
+  `0.79.21` deployment was pending and was not triggered manually. At
+  `2026-11-19T23:37Z` the automatic deployment had completed: both
+  `/api/health/live` and `/api/health` returned HTTP `200` with version
+  `0.79.21`, exact commit `9187655ae9909326d8243eccffc11c2f160bcabb`,
+  environment `production`, `deploymentReady=true`, `database=connected`,
+  `missingEnvVars=[]`. This is deployment/readiness evidence, not live product
+  acceptance.
 - **Not claimed:** no deploy, production DB access, migration,
   Telegram/customer send or paid AI call.
 
