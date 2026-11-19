@@ -29,6 +29,7 @@ import { COPY_REGISTRY } from "@/features/conversation-copy/index";
 import type { CopyRegistryEntry } from "@/features/conversation-copy/types";
 import { AiReadinessCard } from "@/features/dashboard/components/ai-readiness-card";
 import type { GetCopyLabEntryStateResult } from "@/features/platform/actions/copy-lab-actions";
+import { CopyLabBrowser } from "@/features/platform/components/copy-lab-browser";
 import { CopyLabDetail } from "@/features/platform/components/copy-lab-detail";
 import { getPublishFeedbackText } from "@/features/platform/components/copy-lab-logic";
 import { SettingsScreen } from "@/features/settings/components/settings-screen";
@@ -564,14 +565,17 @@ describe("Conversation Lab Runtime Coverage & Honest Wording", () => {
     await settle();
 
     const content = text();
-    expect(content, "connected badge must render").toContain("متصل بالمحادثة");
-    expect(content, "connected scope must explain /start turn").toContain(
-      "مقدمة الترحيب عند بدء محادثة جديدة أو خاملة عبر أمر /start",
+    expect(content, "connected badge must render").toContain(
+      "تجاوز المختبر موصول",
     );
     expect(
       content,
+      "connected scope must explain the exact /start turn scope",
+    ).toContain("مسار /start فقط");
+    expect(
+      content,
       "connected scope must clarify button and continuation isolation",
-    ).toContain("لا يغيّر أزرار الخيارات ولا مسار استئناف الحجز النشط");
+    ).toContain("لا يغيّر أزرار الخيارات ولا استئناف حجز نشط");
     expect(
       content,
       "must state platform overrides are platform-wide",
@@ -585,11 +589,16 @@ describe("Conversation Lab Runtime Coverage & Honest Wording", () => {
     await settle();
 
     const content = text();
-    expect(content, "unwired badge must render").toContain("غير متصل بعد");
+    expect(content, "runtime relevance badge must render").toContain(
+      "مسار قديم/احتياطي",
+    );
+    expect(content, "override connection badge must render").toContain(
+      "تجاوز غير موصول",
+    );
     expect(
       content,
       "must clarify publishing does not change live replies",
-    ).toContain("الحفظ أو النشر في مخزن المنصة لا يغيّر الردود الحية للعملاء");
+    ).toContain("لا يقرأ المحرك تجاوزات المختبر");
     expect(
       content,
       "authoring, preview, history and restore remain available",
@@ -605,7 +614,12 @@ describe("Conversation Lab Runtime Coverage & Honest Wording", () => {
     await settle();
 
     const content = text();
-    expect(content, "renders unwired badge").toContain("غير متصل بعد");
+    expect(content, "renders operational relevance badge").toContain(
+      "نص تشغيلي حالي",
+    );
+    expect(content, "renders protected override status").toContain(
+      "تجاوز غير متاح",
+    );
     expect(content, "renders protected notice").toContain(
       "نص محمي — غير قابل للتعديل",
     );
@@ -628,10 +642,10 @@ describe("Conversation Lab Runtime Coverage & Honest Wording", () => {
       "PLATFORM_OVERRIDE",
     );
 
-    expect(welcome).toContain("مسار /start للمحادثة الجديدة/الخاملة");
+    expect(welcome).toContain("مسار /start لمحادثة جديدة أو خاملة");
     expect(welcome).toContain("لا يعني ذلك التحقق من تسليم المزود");
-    expect(unwired).toContain("غير متصل بالمحادثة الحية بعد");
-    expect(unwired).toContain("لن تتغير ردود العملاء الحية حالياً");
+    expect(unwired).toContain("تجاوز المختبر غير موصول");
+    expect(unwired).toContain("لن تتغير الردود الحية");
   });
 });
 
@@ -663,10 +677,9 @@ describe("Conversation Lab Protected Guidance & Mutation Feedback Lifecycle (PR6
     await settle();
 
     const content = text();
-    expect(content).toContain("غير متصل بعد");
-    expect(content).toContain(
-      "الحفظ أو النشر في مخزن المنصة لا يغيّر الردود الحية للعملاء",
-    );
+    expect(content).toContain("مسار قديم/احتياطي");
+    expect(content).toContain("تجاوز غير موصول");
+    expect(content).toContain("لا يقرأ المحرك تجاوزات المختبر");
     expect(content).toContain(
       "تظل إمكانية التعديل والمعاينة وسجل التعديلات والاسترجاع متاحة",
     );
@@ -709,7 +722,7 @@ describe("Conversation Lab Protected Guidance & Mutation Feedback Lifecycle (PR6
     const content = text();
     expect(content).toContain("تم حفظ التجاوز في مخزن المنصة");
     expect(content).toContain("تجاوز المنصة");
-    expect(content).toContain("لن تتغير ردود العملاء الحية حالياً");
+    expect(content).toContain("لن تتغير الردود الحية");
 
     // Clearing stale feedback on subsequent draft edit
     act(() => {
@@ -751,7 +764,7 @@ describe("Conversation Lab Protected Guidance & Mutation Feedback Lifecycle (PR6
     );
     expect(content).not.toContain("تم حفظ التجاوز");
     expect(content).not.toContain("تم نشر التجاوز");
-    expect(content).toContain("لن تتغير ردود العملاء الحية حالياً");
+    expect(content).toContain("تجاوز المختبر غير موصول");
   });
 
   it("restore feedback is operation-correct and survives readback", async () => {
@@ -783,7 +796,7 @@ describe("Conversation Lab Protected Guidance & Mutation Feedback Lifecycle (PR6
     expect(content).toContain("تم استرجاع النسخة المحددة في مخزن المنصة");
     expect(content).not.toContain("تم حفظ التجاوز");
     expect(content).not.toContain("تم نشر التجاوز");
-    expect(content).toContain("لن تتغير ردود العملاء الحية حالياً");
+    expect(content).toContain("تجاوز المختبر غير موصول");
   });
 
   it("mutation failure does not display success", async () => {
@@ -862,6 +875,187 @@ describe("Conversation Lab Protected Guidance & Mutation Feedback Lifecycle (PR6
       "تم حفظ التعديل بنجاح في مخزن المنصة، لكن تعذر تحديث عرض الحالة الحالية فوراً",
     );
     expect(content).toContain("دون إثبات قراءة راجعة");
+    expect(
+      content,
+      "readback failure must be visible without hiding the editor",
+    ).toContain("تعذّر تحديث الحالة بعد آخر عملية");
+    expect(
+      editorTextarea()?.value,
+      "failed readback must preserve the local edit",
+    ).toBe("تعديل ينجح مع فشل القراءة الراجعة");
+  });
+
+  it("failed publish preserves the local edit and never reports success", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const textarea = editorTextarea();
+    expect(textarea).not.toBeNull();
+    act(() => {
+      typeInEditor(textarea!, "تعديل يجب ألا يضيع عند الفشل");
+    });
+
+    publishCopyOverrideAction.mockResolvedValue({
+      success: false,
+      error: {
+        code: "PERSISTENCE_FAILED",
+        message: "failed",
+      },
+    });
+
+    await act(async () => {
+      findButton(PUBLISH_LABEL)!.click();
+    });
+    await settle();
+
+    expect(
+      editorTextarea()?.value,
+      "a failed publish must keep the draft exactly as typed",
+    ).toBe("تعديل يجب ألا يضيع عند الفشل");
+    expect(text()).not.toContain("تم حفظ التجاوز");
+  });
+});
+
+describe("Conversation Lab editor alignment (validation, dirty state, discard)", () => {
+  it("compares dirty state to the loaded effective override, not the code default", async () => {
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(successWithOverride(entry));
+    renderDetail(entry);
+    await settle();
+
+    expect(editorTextarea()?.value).toBe(PUBLISHED_TEXT);
+    expect(
+      findButton(PUBLISH_LABEL)?.disabled,
+      "an untouched editor loaded from a published override is not a change",
+    ).toBe(true);
+    expect(text()).not.toContain("تعديلات محلية غير مطبقة");
+
+    act(() => {
+      typeInEditor(editorTextarea()!, "تعديل جديد فوق التجاوز المنشور");
+    });
+
+    expect(
+      findButton(PUBLISH_LABEL)?.disabled,
+      "a real difference from the loaded effective text enables publishing",
+    ).toBe(false);
+    expect(text()).toContain("تعديلات محلية غير مطبقة");
+  });
+
+  it("reuses the canonical validator for required placeholders and repairs", async () => {
+    const entry = findEntry("booking.business_closed");
+    expect(entry.requiredPlaceholders).toContain("date");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry);
+    await settle();
+
+    const textarea = editorTextarea();
+    expect(textarea).not.toBeNull();
+    act(() => {
+      typeInEditor(textarea!, entry.defaultText);
+    });
+    expect(
+      findButton(PUBLISH_LABEL)?.disabled,
+      "a valid template differing from effective text is publishable",
+    ).toBe(false);
+
+    act(() => {
+      typeInEditor(textarea!, "المنشأة مغلقة — يرجى اختيار تاريخ آخر.");
+    });
+    expect(text()).toContain("حقل مطلوب ناقص");
+    expect(
+      findButton(PUBLISH_LABEL)?.disabled,
+      "a missing required placeholder must disable publishing",
+    ).toBe(true);
+
+    act(() => {
+      typeInEditor(textarea!, "المنشأة مغلقة يوم {date} — اختر تاريخاً آخر.");
+    });
+    expect(text()).not.toContain("حقل مطلوب ناقص");
+    expect(
+      findButton(PUBLISH_LABEL)?.disabled,
+      "restoring the required placeholder repairs the candidate",
+    ).toBe(false);
+  });
+
+  it("asks before discarding local edits, and honors stay versus discard", async () => {
+    const onOpenChange = vi.fn();
+    const entry = findEntry("greeting.invite");
+    getCopyLabEntryStateAction.mockResolvedValue(successState(entry));
+    renderDetail(entry, onOpenChange);
+    await settle();
+
+    act(() => {
+      typeInEditor(editorTextarea()!, "تعديل محلي غير منشور");
+    });
+
+    await act(async () => {
+      findButton("إغلاق")!.click();
+    });
+    expect(
+      onOpenChange,
+      "closing with unapplied edits must not close immediately",
+    ).not.toHaveBeenCalled();
+    expect(text()).toContain("لديك تعديلات محلية غير مطبقة");
+
+    await act(async () => {
+      findButton("البقاء")!.click();
+    });
+    expect(findButton("تجاهل وإغلاق")).toBeNull();
+    expect(editorTextarea()?.value).toBe("تعديل محلي غير منشور");
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    await act(async () => {
+      findButton("إغلاق")!.click();
+    });
+    await act(async () => {
+      findButton("تجاهل وإغلاق")!.click();
+    });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("Conversation Lab default operational scope", () => {
+  it("hides legacy/unused entries by default and exposes them through «كل السجل»", async () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() => {
+      root.render(<CopyLabBrowser entries={COPY_REGISTRY} />);
+    });
+    await settle();
+
+    expect(text()).toContain("التشغيلي الحالي");
+    expect(text()).toContain("welcome.intro");
+    expect(
+      text(),
+      "legacy greeting wording must not appear in the default operational view",
+    ).not.toContain("greeting.ack.salam");
+    expect(
+      text(),
+      "legacy booking wording must not appear in the default operational view",
+    ).not.toContain("booking.request");
+    expect(
+      text(),
+      "the unused Telegram constant must not appear in the default view",
+    ).not.toContain("channel.telegram.start_welcome");
+
+    await act(async () => {
+      findButton("كل السجل")!.click();
+    });
+    await settle();
+
+    expect(text()).toContain("greeting.ack.salam");
+    expect(text()).toContain("booking.request");
+    expect(text()).toContain("channel.telegram.start_welcome");
+    expect(text()).toContain("مسار قديم/احتياطي");
+    expect(text()).toContain("نص غير مستخدم");
+
+    act(() => {
+      root.unmount();
+    });
+    container.remove();
   });
 });
 

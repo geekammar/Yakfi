@@ -19,6 +19,7 @@
  * the detail view may attach, so the persistence slice can extend the browser
  * without rewriting these projections.
  */
+import type { CanonicalCopyKey } from "@/features/conversation-copy/registry";
 import type {
   CopyCategory,
   CopyClassification,
@@ -78,6 +79,140 @@ export const COPY_CLASSIFICATION_FILTER_LABELS: Readonly<
   ...COPY_CLASSIFICATION_LABELS,
 };
 
+/**
+ * Runtime relevance answers ONE question: is this wording still produced by
+ * the current default path? It is deliberately separate from whether the Lab
+ * override store is consumed at runtime (`getCopyRuntimeCoverage` below).
+ *
+ * - CURRENT_OPERATIONAL_TEMPLATE — deterministic engine/domain wording that
+ *   the current operational path can emit.
+ * - AUTHORITATIVE_DATA_PRESENTATION — server-rendered business data, not a
+ *   response template and not model-authored prose.
+ * - LEGACY_ONLY_PATH — wording reachable only through a legacy/fallback
+ *   assistant (including the policy-read failure path), not the default
+ *   structured path.
+ * - UNUSED_CODE — the symbol exists but no caller emits it.
+ * - UNRESOLVED — evidence is insufficient to classify safely.
+ */
+export type CopyRuntimeRelevance =
+  | "CURRENT_OPERATIONAL_TEMPLATE"
+  | "AUTHORITATIVE_DATA_PRESENTATION"
+  | "LEGACY_ONLY_PATH"
+  | "UNUSED_CODE"
+  | "UNRESOLVED";
+
+export const COPY_RUNTIME_RELEVANCE_LABELS: Readonly<
+  Record<CopyRuntimeRelevance, string>
+> = {
+  CURRENT_OPERATIONAL_TEMPLATE: "نص تشغيلي حالي",
+  AUTHORITATIVE_DATA_PRESENTATION: "عرض بيانات مرجعية",
+  LEGACY_ONLY_PATH: "مسار قديم/احتياطي",
+  UNUSED_CODE: "نص غير مستخدم",
+  UNRESOLVED: "يحتاج تحقيقاً",
+};
+
+export const COPY_RUNTIME_RELEVANCE_HINTS: Readonly<
+  Record<CopyRuntimeRelevance, string>
+> = {
+  CURRENT_OPERATIONAL_TEMPLATE:
+    "النص يُنتج فعلياً من الكود في المسار التشغيلي الحالي، سواء كرد مباشر أو كقالب قرار. هذا لا يعني أن تجاوز المختبر يُقرأ وقت التشغيل.",
+  AUTHORITATIVE_DATA_PRESENTATION:
+    "صياغة عرض لبيانات المنشأة المرجعية يملكها الخادم؛ ليست تفسيراً لنية العميل ولا استنتاجاً من كلماته.",
+  LEGACY_ONLY_PATH:
+    "النص موجود في مسار احتياطي/قديم فقط (مثل المساعد الحتمي عند تعذر قراءة سياسة المنصة)، وليس في المسار الافتراضي المهيكل.",
+  UNUSED_CODE:
+    "الرمز ما زال معرّفاً في الكود لكن لا يوجد مستدعٍ يرسل هذا النص للعميل حالياً.",
+  UNRESOLVED:
+    "الأدلة الحالية غير كافية لتصنيف هذا المفتاح؛ يلزم تحقيق إضافي قبل أي قرار.",
+};
+
+/**
+ * Verified relevance per canonical key. Exhaustive by construction: adding a
+ * registry key without classifying it is a TypeScript error, and the offline
+ * check independently verifies the count. This is presentation metadata only;
+ * it never changes registry defaults, storage, or the runtime reply path.
+ */
+export const COPY_RUNTIME_RELEVANCE_BY_KEY: Readonly<
+  Record<CanonicalCopyKey, CopyRuntimeRelevance>
+> = {
+  "greeting.ack.salam": "LEGACY_ONLY_PATH",
+  "greeting.ack.morning": "LEGACY_ONLY_PATH",
+  "greeting.ack.evening": "LEGACY_ONLY_PATH",
+  "greeting.ack.default": "LEGACY_ONLY_PATH",
+  "greeting.invite": "LEGACY_ONLY_PATH",
+  "welcome.intro": "CURRENT_OPERATIONAL_TEMPLATE",
+  "identity.reply": "AUTHORITATIVE_DATA_PRESENTATION",
+  "clarify.intent": "CURRENT_OPERATIONAL_TEMPLATE",
+  "clarify.service": "CURRENT_OPERATIONAL_TEMPLATE",
+  "clarify.date": "CURRENT_OPERATIONAL_TEMPLATE",
+  "clarify.service_ambiguous": "CURRENT_OPERATIONAL_TEMPLATE",
+  "clarify.service_ambiguous_offer": "CURRENT_OPERATIONAL_TEMPLATE",
+  "interruption.ack": "CURRENT_OPERATIONAL_TEMPLATE",
+  "continue.invite": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.offer": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.invalid_index": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.unknown_time": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.ambiguous_time": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.conflict": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.retry": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.confirmed": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.pending": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.stale_options": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.stale_option": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.slot_taken": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.service_unavailable": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.service_not_found": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.service_inactive": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.branch_not_found": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.no_business": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.invalid_input": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.booking_failed": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.provider_not_eligible": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.provider_ambiguous": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.no_eligible_providers": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.business_closed": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.service_too_long": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.fully_booked": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.no_options": "CURRENT_OPERATIONAL_TEMPLATE",
+  "booking.request": "LEGACY_ONLY_PATH",
+  "booking.availability": "LEGACY_ONLY_PATH",
+  "booking.reschedule": "LEGACY_ONLY_PATH",
+  "booking.cancellation": "LEGACY_ONLY_PATH",
+  "handoff.human_request": "CURRENT_OPERATIONAL_TEMPLATE",
+  "handoff.sensitive": "CURRENT_OPERATIONAL_TEMPLATE",
+  "handoff.no_knowledge": "CURRENT_OPERATIONAL_TEMPLATE",
+  "handoff.ambiguous": "CURRENT_OPERATIONAL_TEMPLATE",
+  "channel.telegram.start_welcome": "UNUSED_CODE",
+};
+
+/**
+ * Verified per-key notes that must not be flattened into a generic label.
+ * These are evidence-backed discrepancies, not future-wiring promises.
+ */
+export const COPY_RUNTIME_KEY_NOTES: Readonly<
+  Partial<Record<CanonicalCopyKey, string>>
+> = {
+  "booking.confirmed":
+    "تحقق: الصياغة الحالية في المحرك تضيف «لدى {businessName}» وتستخدم تعبيراً زمنياً مرناً؛ النص الافتراضي في السجل يحتاج تحديثاً منفصلاً ولا يطابق الإخراج الحالي حرفاً بحرف.",
+  "booking.pending":
+    "تحقق: الصياغة الحالية في المحرك تضيف «لدى {businessName}» وتستخدم تعبيراً زمنياً مرناً؛ النص الافتراضي في السجل يحتاج تحديثاً منفصلاً ولا يطابق الإخراج الحالي حرفاً بحرف.",
+  "channel.telegram.start_welcome":
+    "الرمز مُعرَّف ومُصدَّر، لكن لا يوجد مستدعٍ له؛ مسار /start الفعلي يمر عبر المحرك ويستخدم welcome.intro.",
+};
+
+export function getCopyRuntimeRelevance(key: string): CopyRuntimeRelevance {
+  return COPY_RUNTIME_RELEVANCE_BY_KEY[key as CanonicalCopyKey] ?? "UNRESOLVED";
+}
+
+export function isOperationalRuntimeRelevance(
+  relevance: CopyRuntimeRelevance,
+): boolean {
+  return (
+    relevance === "CURRENT_OPERATIONAL_TEMPLATE" ||
+    relevance === "AUTHORITATIVE_DATA_PRESENTATION"
+  );
+}
+
 /** A registry-derived classification chip with its live count. */
 export type CopyClassificationChip = {
   value: CopyClassificationFilter;
@@ -103,17 +238,34 @@ export function buildClassificationChips(
 }
 
 /**
- * Search + classification filter. Returns a NEW array (Array.filter never
- * mutates its input); the registry is untouched. Search matches the canonical
- * key, the human label, or the default text, case-insensitively.
+ * The default operational view shows only keys whose wording is actually
+ * produced by the current runtime path (operational templates and
+ * server-rendered authoritative-data presentation). Legacy/fallback wording,
+ * unused constants, and unresolved entries stay inspectable behind the
+ * explicit "all entries" scope — never implied to be part of today's runtime
+ * or a promised future wiring.
  */
+export type CopyRuntimeScopeFilter = "OPERATIONAL" | "ALL";
+
+/** Search + classification + runtime-scope filter. Returns a NEW array. */
 export function filterCopyEntries(
   entries: readonly CopyRegistryEntry[],
-  options: { search: string; classification: CopyClassificationFilter },
+  options: {
+    search: string;
+    classification: CopyClassificationFilter;
+    scope?: CopyRuntimeScopeFilter;
+  },
 ): CopyRegistryEntry[] {
   const needle = options.search.trim().toLowerCase();
   const classification = options.classification;
+  const scope = options.scope ?? "ALL";
   return entries.filter((entry) => {
+    if (
+      scope === "OPERATIONAL" &&
+      !isOperationalRuntimeRelevance(getCopyRuntimeRelevance(entry.key))
+    ) {
+      return false;
+    }
     if (classification !== "ALL" && entry.classification !== classification) {
       return false;
     }
@@ -269,20 +421,40 @@ export const EFFECTIVE_SOURCE_LABELS: Readonly<
   PLATFORM_OVERRIDE: "تجاوز المنصة",
 };
 
-// ── Runtime Coverage (explicit wiring status & honest stored resolution) ──
+// ── Runtime alignment: relevance vs. override connection (separate) ──────
+//
+// TWO INDEPENDENT FACTS:
+//  1. relevance — is the wording produced by the current default path?
+//  2. override connection — does the runtime READ the Lab override for it?
+//
+// They must never collapse into one badge. Almost every current operational
+// key is NOT override-connected; publishing a Lab override for it changes the
+// store only. Only `welcome.intro` is both operational and override-connected.
 
-export type CopyRuntimeStatus = "CONNECTED" | "NOT_CONNECTED";
+export type CopyOverrideConnection =
+  | "CONNECTED"
+  | "NOT_CONNECTED"
+  | "NOT_APPLICABLE";
 
 export type CopyRuntimeCoverage = {
-  readonly status: CopyRuntimeStatus;
+  /** Whether the current default path emits this wording at all. */
+  readonly relevance: CopyRuntimeRelevance;
+  readonly relevanceLabel: string;
+  readonly relevanceSummary: string;
+  /** Whether the runtime consumes a stored Lab override for this key. */
+  readonly overrideConnection: CopyOverrideConnection;
+  readonly overrideConnectionLabel: string;
+  readonly overrideConnectionSummary: string;
+  /** Verified per-key discrepancy/note, when one exists. */
+  readonly runtimeNote: string | null;
+
+  // Backwards-compatible projections (still clearly override-scoped).
+  /** @deprecated Use `overrideConnection`. Kept for existing consumers. */
+  readonly status: "CONNECTED" | "NOT_CONNECTED";
   readonly isConnected: boolean;
-  /** Short badge label for list card and detail header */
   readonly badgeLabel: string;
-  /** Full status label */
   readonly statusLabel: string;
-  /** Arabic explanation of scope */
   readonly scopeSummary: string;
-  /** Arabic operational detail (fallback behavior, delivery disclaimer, authoring utility) */
   readonly operationalNote: string;
 };
 
@@ -292,45 +464,85 @@ export function isKeyConnectedToRuntime(key: string): boolean {
   return (RUNTIME_CONNECTED_KEYS as readonly string[]).includes(key);
 }
 
+function relevanceSummaryFor(relevance: CopyRuntimeRelevance): string {
+  switch (relevance) {
+    case "CURRENT_OPERATIONAL_TEMPLATE":
+      return "النص يُنتج فعلياً من الكود في المسار التشغيلي الحالي. هذا لا يعني أن تجاوز المختبر يُقرأ وقت التشغيل.";
+    case "AUTHORITATIVE_DATA_PRESENTATION":
+      return "النص عرض مرجعي لبيانات المنشأة يُصيغه الخادم (مثل اسم المنشأة)؛ ليس تفسيراً لنية العميل ولا استنتاجاً من كلماته.";
+    case "LEGACY_ONLY_PATH":
+      return "النص موجود في مسار احتياطي/قديم فقط (مثل المساعد الحتمي عند تعذر قراءة سياسة المنصة أو المستدعين القدامى)، وليس في المسار الافتراضي المهيكل.";
+    case "UNUSED_CODE":
+      return "الرمز ما زال معرّفاً في الكود لكن لا يوجد مستدعٍ يرسل هذا النص للعميل حالياً.";
+    case "UNRESOLVED":
+      return "الأدلة الحالية غير كافية لتصنيف هذا المفتاح؛ يلزم تحقيق إضافي.";
+  }
+}
+
 export function getCopyRuntimeCoverage(
   key: string,
   classification?: CopyClassification,
 ): CopyRuntimeCoverage {
-  if (isKeyConnectedToRuntime(key)) {
+  const relevance = getCopyRuntimeRelevance(key);
+  const runtimeNote = COPY_RUNTIME_KEY_NOTES[key as CanonicalCopyKey] ?? null;
+  const overrideConnected = isKeyConnectedToRuntime(key);
+
+  if (overrideConnected) {
     return {
+      relevance,
+      relevanceLabel: COPY_RUNTIME_RELEVANCE_LABELS[relevance],
+      relevanceSummary: relevanceSummaryFor(relevance),
+      overrideConnection: "CONNECTED",
+      overrideConnectionLabel: "تجاوز المختبر موصول",
+      overrideConnectionSummary:
+        "يقرأ المحرك تجاوز welcome.intro من مخزن المنصة في مسار /start فقط (محادثة جديدة أو خاملة بلا عرض نشط/مهمة حجز قائمة)، مع الرجوع للنص الافتراضي عند التعذر. لا يغيّر أزرار الخيارات ولا استئناف حجز نشط، ولا يثبت تسليم مزود الرسائل.",
+      runtimeNote,
       status: "CONNECTED",
       isConnected: true,
-      badgeLabel: "متصل بالمحادثة",
-      statusLabel: "متصل بمحرك المحادثة الحية",
-      scopeSummary:
-        "مقدمة الترحيب عند بدء محادثة جديدة أو خاملة عبر أمر /start؛ لا يغيّر أزرار الخيارات ولا مسار استئناف الحجز النشط.",
+      badgeLabel: "تجاوز المختبر موصول",
+      statusLabel: "تجاوز المختبر موصول بمسار /start",
+      scopeSummary: relevanceSummaryFor(relevance),
       operationalNote:
-        "عند توفر قالب منشور وصالح في مخزن المنصة، يتم استخدامه ضمن المسار المتصل فقط مع الرجوع التلقائي للنص الافتراضي عند التعذر. هذا الربط لا يضمن ولا يثبت تسليم مزود الرسائل الخارجي.",
+        "التجاوز المنشور والصالح يُقرأ فعلياً في هذا المسار. هذا لا يضمن ولا يثبت تسليم مزود الرسائل الخارجي.",
     };
   }
 
   if (classification === "PROTECTED_COPY") {
     return {
+      relevance,
+      relevanceLabel: COPY_RUNTIME_RELEVANCE_LABELS[relevance],
+      relevanceSummary: relevanceSummaryFor(relevance),
+      overrideConnection: "NOT_APPLICABLE",
+      overrideConnectionLabel: "تجاوز المختبر غير متاح (محمي)",
+      overrideConnectionSummary:
+        "هذا النص محمي لحماية مسارات التحويل الآمن؛ لا تتوفر له عمليات التعديل أو النشر أو إعادة التعيين أو الاسترجاع في مخزن المنصة.",
+      runtimeNote,
       status: "NOT_CONNECTED",
       isConnected: false,
-      badgeLabel: "غير متصل بعد",
-      statusLabel: "غير متصل بمحرك المحادثة الحية بعد",
-      scopeSummary:
-        "هذا المفتاح غير متصل بمحرك المحادثة الحية بعد — النص محمي ومخصص للقراءة فقط.",
+      badgeLabel: "تجاوز غير متاح",
+      statusLabel: "تجاوز المختبر غير متاح للنص المحمي",
+      scopeSummary: relevanceSummaryFor(relevance),
       operationalNote:
-        "هذا النص محمي لحماية مسارات التحويل الآمن؛ ولا تتوفر له عمليات التعديل أو النشر أو إعادة التعيين أو الاسترجاع في مخزن المنصة.",
+        "للقراءة والمعاينة فقط؛ لا يمكن نشره أو تغييره من المختبر.",
     };
   }
 
   return {
+    relevance,
+    relevanceLabel: COPY_RUNTIME_RELEVANCE_LABELS[relevance],
+    relevanceSummary: relevanceSummaryFor(relevance),
+    overrideConnection: "NOT_CONNECTED",
+    overrideConnectionLabel: "تجاوز المختبر غير موصول",
+    overrideConnectionSummary:
+      "لا يقرأ المحرك تجاوزات المختبر لهذا المفتاح وقت التشغيل: الحفظ أو النشر يغيّر المخزن فقط، وقد يظل النص التشغيلي الحالي يُنتج من الكود. إظهار المفتاح أو وجود نص تشغيلي لا يعني وجود خطة لربط تجاوزه لاحقاً.",
+    runtimeNote,
     status: "NOT_CONNECTED",
     isConnected: false,
-    badgeLabel: "غير متصل بعد",
-    statusLabel: "غير متصل بمحرك المحادثة الحية بعد",
-    scopeSummary:
-      "هذا المفتاح غير متصل بمحرك المحادثة الحية بعد — الحفظ أو النشر في مخزن المنصة لا يغيّر الردود الحية للعملاء حالياً.",
+    badgeLabel: "تجاوز غير موصول",
+    statusLabel: "تجاوز المختبر غير موصول بالمحرك",
+    scopeSummary: relevanceSummaryFor(relevance),
     operationalNote:
-      "تظل إمكانية التعديل والمعاينة وسجل التعديلات والاسترجاع متاحة بالكامل للتحضير قبل الربط في إصدار لاحق دون أي تأثير على المحادثات الجارية.",
+      "تظل إمكانية التعديل والمعاينة وسجل التعديلات والاسترجاع متاحة في المخزن، دون التأثير على أي رد حي ما دام التجاوز غير موصول.",
   };
 }
 
@@ -362,23 +574,23 @@ export function getMutationFeedbackText(options: {
 
   if (kind === "publish") {
     if (isConnected) {
-      return `تم نشر التجاوز في مخزن المنصة — يُعتمد القالب الآن من ${sourceName} في مسار /start للمحادثة الجديدة/الخاملة مع توفر البديل الافتراضي عند التعذر (لا يعني ذلك التحقق من تسليم المزود).`;
+      return `تم نشر التجاوز في مخزن المنصة — يُعتمد القالب الآن من ${sourceName} في مسار /start لمحادثة جديدة أو خاملة فقط، مع توفر البديل الافتراضي عند التعذر (لا يعني ذلك التحقق من تسليم المزود).`;
     }
-    return `تم حفظ التجاوز في مخزن المنصة — النص المعتمد في المخزن الآن من ${sourceName}. (تنبيه: هذا المفتاح غير متصل بالمحادثة الحية بعد، ولن تتغير ردود العملاء الحية حالياً).`;
+    return `تم حفظ التجاوز في مخزن المنصة — النص المعتمد في المخزن الآن من ${sourceName}. (تنبيه: تجاوز المختبر غير موصول بهذا المفتاح وقت التشغيل، لذلك لن تتغير الردود الحية جرّاء هذا النشر).`;
   }
 
   if (kind === "reset") {
     if (isConnected) {
       return "تمت إعادة التعيين في مخزن المنصة وحذف التجاوز — يعود المحرك الآن إلى النص الافتراضي في الكود لمسار /start مع استمرار عمل البديل الآمن (لا يعني ذلك التحقق من تسليم المزود).";
     }
-    return "تمت إعادة التعيين في مخزن المنصة وحذف التجاوز — يعود النص المعتمد في المخزن إلى الافتراضي في الكود. (هذا المفتاح غير متصل بالمحادثة الحية بعد، ولن تتغير ردود العملاء الحية حالياً).";
+    return "تمت إعادة التعيين في مخزن المنصة وحذف التجاوز — يعود النص المعتمد في المخزن إلى الافتراضي في الكود. (تجاوز المختبر غير موصول بهذا المفتاح وقت التشغيل؛ الردود الحية لا تتغير جرّاء إعادة التعيين).";
   }
 
   // kind === "restore"
   if (isConnected) {
-    return `تم استرجاع النسخة المحددة في مخزن المنصة — يُعتمد القالب المسترجع الآن من ${sourceName} في مسار /start للمحادثة الجديدة/الخاملة مع توفر البديل الافتراضي عند التعذر (لا يعني ذلك التحقق من تسليم المزود).`;
+    return `تم استرجاع النسخة المحددة في مخزن المنصة — يُعتمد القالب المسترجع الآن من ${sourceName} في مسار /start لمحادثة جديدة أو خاملة فقط، مع توفر البديل الافتراضي عند التعذر (لا يعني ذلك التحقق من تسليم المزود).`;
   }
-  return `تم استرجاع النسخة المحددة في مخزن المنصة — أصبح النص المسترجع هو المعتمد في المخزن من ${sourceName}. (تنبيه: هذا المفتاح غير متصل بالمحادثة الحية بعد، ولن تتغير ردود العملاء الحية حالياً).`;
+  return `تم استرجاع النسخة المحددة في مخزن المنصة — أصبح النص المسترجع هو المعتمد في المخزن من ${sourceName}. (تنبيه: تجاوز المختبر غير موصول بهذا المفتاح وقت التشغيل، لذلك لن تتغير الردود الحية جرّاء الاسترجاع).`;
 }
 
 export function getPublishFeedbackText(

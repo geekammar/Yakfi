@@ -27,12 +27,16 @@
  * allowed to reach the UX-LAB-01C override service. The preview stays pure —
  * no DB, no provider, no network, no customer send.
  */
-import { renderCopyText } from "@/features/conversation-copy";
+import {
+  renderCopyText,
+  validateCopyCandidate,
+} from "@/features/conversation-copy";
 import type { CopyRenderFailureCode } from "@/features/conversation-copy/render";
 import type {
   CopyRegistryEntry,
   PlaceholderName,
 } from "@/features/conversation-copy/types";
+import type { CopyValidationFailure } from "@/features/conversation-copy/validation";
 import {
   getCopyLabEntryStateAction,
   publishCopyOverrideAction,
@@ -64,7 +68,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Drawer,
-  DrawerClose,
   DrawerContent,
   DrawerDescription,
   DrawerFooter,
@@ -169,6 +172,7 @@ export function CopyLabDetail({
     readonly message: string;
   } | null>(null);
   const [confirmingReset, setConfirmingReset] = useState(false);
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
 
   const applyResult = useCallback(
     (result: GetCopyLabEntryStateResult) => {
@@ -218,16 +222,15 @@ export function CopyLabDetail({
             : undefined,
         };
       }
+      // A post-mutation readback failure must not destroy the editor state or
+      // the local draft. Keep the last good effective state and surface the
+      // failure through the mutation feedback instead.
       setLoadFailed(true);
-      setEffective(null);
-      setHistory(null);
       return { ok: false };
     } catch {
-      // Never let a thrown boundary call crash the drawer: keep the safe
-      // registry default and explain the state.
+      // Never let a thrown boundary call crash the drawer, and never discard
+      // edits the founder already typed because a readback failed.
       setLoadFailed(true);
-      setEffective(null);
-      setHistory(null);
       return { ok: false };
     } finally {
       setLoading(false);
@@ -288,10 +291,48 @@ export function CopyLabDetail({
     [entry.key, draft, values],
   );
 
+  // Reuse the CANONICAL candidate validator for immediate feedback. Publishing
+  // is disabled while invalid, and the server boundary still validates again.
+  const validation = useMemo(
+    () => validateCopyCandidate(entry.key, draft),
+    [entry.key, draft],
+  );
+  const validationFailure = validation.ok ? null : validation;
+
   const editable = effective?.editable ?? !isProtected;
-  const unchanged = effective !== null && draft === effective.text;
+  // Dirty means "the local draft differs from the LOADED EFFECTIVE text",
+  // never "differs from the code default". When a valid published override is
+  // loaded, an untouched editor is clean even though it differs from the code
+  // default; after a failed readback the last loaded effective text remains the
+  // honest comparison baseline.
+  const hasUnappliedChanges = effective !== null && draft !== effective.text;
+  const unchanged = effective !== null && !hasUnappliedChanges;
   const persistenceDown = effective !== null && !effective.persistenceAvailable;
   const canMutate = editable && effective !== null && !persistenceDown;
+  const canPublish =
+    canMutate && hasUnappliedChanges && validation.ok && pending === null;
+
+  function requestClose(): void {
+    if (hasUnappliedChanges) {
+      setConfirmingDiscard(true);
+      setFeedback(null);
+      setError(null);
+      return;
+    }
+    setConfirmingDiscard(false);
+    setFeedback(null);
+    setError(null);
+    setConfirmingReset(false);
+    onOpenChange(false);
+  }
+
+  function discardAndClose(): void {
+    setConfirmingDiscard(false);
+    setFeedback(null);
+    setError(null);
+    setConfirmingReset(false);
+    onOpenChange(false);
+  }
 
   async function run(
     kind: MutationKind,
@@ -314,10 +355,10 @@ export function CopyLabDetail({
         },
       };
     }
-    setPending(null);
     if (result.success) {
       setConfirmingReset(false);
       const refreshResult = await refresh();
+      setPending(null);
       if (refreshResult.ok) {
         setFeedback({
           kind,
@@ -342,6 +383,7 @@ export function CopyLabDetail({
       }
       return;
     }
+    setPending(null);
     setError(toMutationError(result.error));
   }
 
@@ -358,9 +400,19 @@ export function CopyLabDetail({
       open={open}
       onOpenChange={(nextOpen) => {
         if (!nextOpen) {
+          // Swipe/overlay/Escape go through here. Never discard local edits
+          // silently: ask first when the draft differs from the loaded
+          // effective text.
+          if (hasUnappliedChanges) {
+            setConfirmingDiscard(true);
+            setFeedback(null);
+            setError(null);
+            return;
+          }
           setFeedback(null);
           setError(null);
           setConfirmingReset(false);
+          setConfirmingDiscard(false);
         }
         onOpenChange(nextOpen);
       }}
@@ -390,12 +442,14 @@ export function CopyLabDetail({
 
           {loading ? (
             <LoadingState />
-          ) : loadFailed || effective === null ? (
+          ) : effective === null ? (
             <LoadFailedNotice />
           ) : (
             <>
               {/* ── EFFECTIVE STATE (product-first) ───────────────────── */}
               <EffectiveStateBlock entry={entry} state={effective} />
+
+              {loadFailed ? <ReadbackFailedNotice /> : null}
 
               {canMutate ? (
                 <CopyEditor
@@ -405,8 +459,11 @@ export function CopyLabDetail({
                     setDraft(value);
                     setFeedback(null);
                     setError(null);
+                    setConfirmingDiscard(false);
                   }}
                   characters={[...draft].length}
+                  validationFailure={validationFailure}
+                  hasUnappliedChanges={hasUnappliedChanges}
                 />
               ) : null}
             </>
@@ -478,7 +535,7 @@ export function CopyLabDetail({
               <Button
                 type="button"
                 className="h-11 w-full"
-                disabled={pending !== null || unchanged}
+                disabled={!canPublish}
                 onClick={() =>
                   run("publish", () =>
                     publishCopyOverrideAction({ key: entry.key, text: draft }),
@@ -494,9 +551,13 @@ export function CopyLabDetail({
                   </>
                 )}
               </Button>
-              {unchanged ? (
+              {validationFailure ? (
+                <p className="text-destructive text-center text-xs">
+                  {COPY_VALIDATION_FAILURE_GUIDANCE[validationFailure.code]}
+                </p>
+              ) : unchanged ? (
                 <p className="text-muted-foreground text-center text-xs">
-                  النص الحالي مطابق للمخزن — لا يوجد تغيير للنشر.
+                  النص الحالي مطابق للنص الفعلي — لا يوجد تغيير للنشر.
                 </p>
               ) : null}
 
@@ -561,9 +622,49 @@ export function CopyLabDetail({
             </div>
           ) : null}
 
-          <DrawerClose asChild>
-            <ButtonFullWidth label="إغلاق" />
-          </DrawerClose>
+          {confirmingDiscard ? (
+            <div
+              role="alert"
+              className="space-y-2 rounded-xl border border-warning/30 bg-warning/5 p-3 text-start"
+            >
+              <p className="text-sm font-medium">
+                لديك تعديلات محلية غير مطبقة
+              </p>
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                إغلاق النافذة سيتجاهل التعديلات المحلية غير المطبقة على
+                الحالة المعروضة، ولا يحذف ما نُشر بنجاح في المخزن. هل تريد
+                المتابعة؟
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="h-11 flex-1"
+                  onClick={discardAndClose}
+                >
+                  تجاهل وإغلاق
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 flex-1"
+                  onClick={() => setConfirmingDiscard(false)}
+                >
+                  البقاء
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 w-full"
+              onClick={requestClose}
+            >
+              <XIcon aria-hidden className="size-4" />
+              إغلاق
+            </Button>
+          )}
         </DrawerFooter>
       </DrawerContent>
     </Drawer>
@@ -581,6 +682,30 @@ function LoadingState() {
       <div className="bg-muted h-3 w-1/3 animate-pulse rounded" />
       <div className="bg-muted h-12 w-full animate-pulse rounded" />
       <p className="text-muted-foreground text-xs">يُقرأ النص من المخزن…</p>
+    </div>
+  );
+}
+
+/** A failed post-mutation readback: keep the last good effective state. */
+function ReadbackFailedNotice() {
+  return (
+    <div
+      role="alert"
+      className="flex items-start gap-2.5 rounded-xl border border-warning/30 bg-warning/5 p-3.5"
+    >
+      <CircleAlertIcon
+        aria-hidden
+        className="mt-0.5 size-4 shrink-0 text-warning-foreground"
+      />
+      <div className="space-y-1 text-sm">
+        <p className="font-medium text-warning-foreground">
+          تعذّر تحديث الحالة بعد آخر عملية
+        </p>
+        <p className="text-muted-foreground text-xs leading-relaxed">
+          تُعرض آخر حالة مقروءة، وتبقى تعديلاتك المحلية كما هي. أعد فتح النص
+          لاحقاً للتحقق من الحالة المخزنة.
+        </p>
+      </div>
     </div>
   );
 }
@@ -609,55 +734,97 @@ function LoadFailedNotice() {
   );
 }
 
-/** The explicit runtime coverage block showing whether the engine consumes this key. */
+/**
+ * Relevance and override connection are TWO separate facts. This block renders
+ * them as two independent sections so an operational key is never mislabeled
+ * "unconnected" (the wording IS produced) and an override is never implied to
+ * affect a path that does not read it.
+ */
 function RuntimeCoverageBlock({ entry }: { entry: CopyRegistryEntry }) {
   const coverage = getCopyRuntimeCoverage(entry.key, entry.classification);
+  const operational =
+    coverage.relevance === "CURRENT_OPERATIONAL_TEMPLATE" ||
+    coverage.relevance === "AUTHORITATIVE_DATA_PRESENTATION";
 
-  if (coverage.isConnected) {
-    return (
-      <div className="space-y-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-start">
+  return (
+    <div className="space-y-2">
+      <div
+        className={cn(
+          "space-y-1.5 rounded-xl border p-3 text-start",
+          operational
+            ? "border-sky-500/30 bg-sky-500/5"
+            : "border-muted bg-muted/20",
+        )}
+      >
         <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+          <span
+            className={cn(
+              "flex items-center gap-1.5 text-xs font-semibold",
+              operational
+                ? "text-sky-700 dark:text-sky-300"
+                : "text-muted-foreground",
+            )}
+          >
             <RadioIcon aria-hidden className="size-3.5" />
-            حالة الربط بمحرك المحادثة: متصل
+            صلة النص بالمسار التشغيلي الحالي
           </span>
           <Badge
             variant="outline"
-            className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-normal"
+            className={cn(
+              "text-xs font-normal",
+              operational
+                ? "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300"
+                : "text-muted-foreground border-dashed",
+            )}
           >
-            {coverage.badgeLabel}
+            {coverage.relevanceLabel}
           </Badge>
         </div>
         <p className="text-xs leading-relaxed text-foreground">
-          {coverage.scopeSummary}
+          {coverage.relevanceSummary}
         </p>
-        <p className="text-muted-foreground text-xs leading-relaxed">
-          {coverage.operationalNote}
-        </p>
+        {coverage.runtimeNote ? (
+          <p className="rounded-lg bg-background/60 p-2 text-muted-foreground text-xs leading-relaxed">
+            {coverage.runtimeNote}
+          </p>
+        ) : null}
       </div>
-    );
-  }
 
-  return (
-    <div className="space-y-1.5 rounded-xl border border-muted bg-muted/20 p-3 text-start">
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-          <RadioIcon aria-hidden className="size-3.5" />
-          حالة الربط بمحرك المحادثة: غير متصل بعد
-        </span>
-        <Badge
-          variant="outline"
-          className="text-muted-foreground border-dashed text-xs font-normal"
-        >
-          {coverage.badgeLabel}
-        </Badge>
+      <div
+        className={cn(
+          "space-y-1.5 rounded-xl border p-3 text-start",
+          coverage.overrideConnection === "CONNECTED"
+            ? "border-emerald-500/30 bg-emerald-500/5"
+            : "border-muted bg-muted/20",
+        )}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span
+            className={cn(
+              "flex items-center gap-1.5 text-xs font-semibold",
+              coverage.overrideConnection === "CONNECTED"
+                ? "text-emerald-700 dark:text-emerald-400"
+                : "text-muted-foreground",
+            )}
+          >
+            ربط تجاوز المختبر بالمحرك
+          </span>
+          <Badge
+            variant="outline"
+            className={cn(
+              "text-xs font-normal",
+              coverage.overrideConnection === "CONNECTED"
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                : "text-muted-foreground border-dashed",
+            )}
+          >
+            {coverage.overrideConnectionLabel}
+          </Badge>
+        </div>
+        <p className="text-xs leading-relaxed text-foreground">
+          {coverage.overrideConnectionSummary}
+        </p>
       </div>
-      <p className="text-xs leading-relaxed text-foreground">
-        {coverage.scopeSummary}
-      </p>
-      <p className="text-muted-foreground text-xs leading-relaxed">
-        {coverage.operationalNote}
-      </p>
     </div>
   );
 }
@@ -808,11 +975,15 @@ function CopyEditor({
   draft,
   onDraftChange,
   characters,
+  validationFailure,
+  hasUnappliedChanges,
 }: {
   entry: CopyRegistryEntry;
   draft: string;
   onDraftChange: (value: string) => void;
   characters: number;
+  validationFailure: CopyValidationFailure | null;
+  hasUnappliedChanges: boolean;
 }) {
   const inputId = `copy-lab-editor-${entry.key}`;
   return (
@@ -837,8 +1008,25 @@ function CopyEditor({
         dir="auto"
         value={draft}
         onChange={(event) => onDraftChange(event.target.value)}
-        aria-describedby={`${inputId}-hint`}
+        aria-invalid={validationFailure !== null}
+        aria-describedby={`${inputId}-hint ${inputId}-dirty`}
       />
+      <p id={`${inputId}-dirty`} className="text-xs">
+        {hasUnappliedChanges ? (
+          <span className="text-amber-600 dark:text-amber-500">
+            تعديلات محلية غير مطبقة على النص الفعلي.
+          </span>
+        ) : (
+          <span className="text-muted-foreground">
+            النص مطابق للنص الفعلي المحمّل.
+          </span>
+        )}
+      </p>
+      {validationFailure ? (
+        <p role="alert" className="text-destructive text-xs leading-relaxed">
+          {COPY_VALIDATION_FAILURE_GUIDANCE[validationFailure.code]}
+        </p>
+      ) : null}
       <p id={`${inputId}-hint`} className="text-muted-foreground text-xs">
         {entry.placeholders.length > 0
           ? "احتفظ بالحقول بين الأقواس كما هي — التحقق قبل النشر يرفض الحذف."
@@ -1240,25 +1428,5 @@ function ClassificationBadge({
     <Badge variant="outline" className="shrink-0">
       نص
     </Badge>
-  );
-}
-
-/**
- * The footer's full-width control. It forwards every prop it is given because
- * `DrawerClose asChild` (Radix Slot) merges its OWN props — the click handler
- * that closes the drawer, plus `type="button"` — onto THIS element. A
- * destructured `{ label }` signature silently drops them: the rendered button
- * then carries no click handler at all, so the Close control is inert (B3,
- * UX-LAB-01D-P1 — the exact "Close does not respond" symptom).
- */
-function ButtonFullWidth({
-  label,
-  ...props
-}: { label: string } & React.ComponentProps<typeof Button>) {
-  return (
-    <Button className="h-11 w-full" variant="outline" {...props}>
-      <XIcon aria-hidden className="size-4" />
-      {label}
-    </Button>
   );
 }
