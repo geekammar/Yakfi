@@ -777,13 +777,16 @@ async function main(): Promise<void> {
       startWelcomeRefs.push(rel);
     }
   }
-  check(
-    "I3. ثابت ترحيب Telegram معلن مرة واحدة بلا مستدعٍ — مصنّف كنص غير مستخدم بأدلة",
-    startWelcomeRefs.length === 1 &&
-      startWelcomeRefs[0] === TELEGRAM_WEBHOOK_FILE,
+  const executableStartWelcomeRefs = startWelcomeRefs.filter(
+    (rel) => !rel.startsWith(REGISTRY_DIR),
   );
-  if (startWelcomeRefs.length > 0) {
-    for (const rel of new Set(startWelcomeRefs))
+  check(
+    "I3. ثابت ترحيب Telegram معلن مرة واحدة بلا مستدعٍ تنفيذي — مصنّف كنص غير مستخدم بأدلة",
+    executableStartWelcomeRefs.length === 1 &&
+      executableStartWelcomeRefs[0] === TELEGRAM_WEBHOOK_FILE,
+  );
+  if (executableStartWelcomeRefs.length > 0) {
+    for (const rel of new Set(executableStartWelcomeRefs))
       console.error(`   start-welcome ref: ${rel}`);
   }
 
