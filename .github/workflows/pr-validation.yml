@@ -71,6 +71,11 @@ jobs:
       - name: Setup local environment
         run: node scripts/setup-env.mjs
 
+      - name: TEMP capture prettier diff
+        run: |
+          pnpm exec prettier --write scripts/check-policy-failure-fail-closed.ts
+          git diff -- scripts/check-policy-failure-fail-closed.ts
+
       - name: Verify code quality (lint, typecheck, format, build)
         run: pnpm verify
 
