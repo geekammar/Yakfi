@@ -341,13 +341,13 @@ async function readTelegramWebhookInfo(
   const pending = info.pending_update_count;
   const pendingValid =
     typeof pending === "number" && Number.isInteger(pending) && pending >= 0;
-  const rawAllowedUpdates = info.allowed_updates;
+  const rawAllowedUpdates: unknown = info.allowed_updates;
   const allowedUpdatesValid = isValidAllowedUpdates(rawAllowedUpdates);
   const allowedUpdates = allowedUpdatesValid
     ? [...rawAllowedUpdates]
     : Array.isArray(rawAllowedUpdates)
       ? rawAllowedUpdates.filter(
-          (value): value is string => typeof value === "string",
+          (value: unknown): value is string => typeof value === "string",
         )
       : [];
   const lastErrorDate =
