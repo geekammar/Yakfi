@@ -711,8 +711,7 @@ export async function applyRenderTelegramCutover(
       allowedUpdates: outcome.allowedUpdates,
       observedAllowedUpdates:
         outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
-      observedAllowedUpdatesValid:
-        outcome.observedAllowedUpdatesValid ?? false,
+      observedAllowedUpdatesValid: outcome.observedAllowedUpdatesValid ?? false,
       observedAllowedUpdatesPhase: "POST_OPERATION",
       desiredAllowedUpdates:
         outcome.desiredAllowedUpdates ?? preflight.desiredAllowedUpdates,
@@ -939,8 +938,7 @@ export async function reconcileRenderTelegramCutover(
       allowedUpdates: outcome.allowedUpdates,
       observedAllowedUpdates:
         outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
-      observedAllowedUpdatesValid:
-        outcome.observedAllowedUpdatesValid ?? false,
+      observedAllowedUpdatesValid: outcome.observedAllowedUpdatesValid ?? false,
       observedAllowedUpdatesPhase: "POST_OPERATION",
       desiredAllowedUpdates:
         outcome.desiredAllowedUpdates ?? preflight.desiredAllowedUpdates,

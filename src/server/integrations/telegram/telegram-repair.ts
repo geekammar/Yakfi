@@ -757,9 +757,7 @@ export function sameStringSet(observed: string[], expected: string[]): boolean {
 export function isValidAllowedUpdates(raw: unknown): raw is string[] {
   return (
     Array.isArray(raw) &&
-    raw.every(
-      (value) => typeof value === "string" && value.trim().length > 0,
-    )
+    raw.every((value) => typeof value === "string" && value.trim().length > 0)
   );
 }
 

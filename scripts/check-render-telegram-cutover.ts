@@ -1300,8 +1300,7 @@ async function main(): Promise<void> {
       const apply = await applyRenderTelegramCutover(
         {
           ...preflightParams(),
-          expectedCurrentWebhookUrl:
-            RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+          expectedCurrentWebhookUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
         },
         deps,
       );
