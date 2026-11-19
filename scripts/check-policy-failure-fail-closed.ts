@@ -33,7 +33,10 @@ import {
   SAFE_HANDOFF_REPLIES,
   type ConversationAi,
 } from "../src/features/conversations/server/conversation-ai";
-import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
+import {
+  receiveInboundMessage,
+  type InboundSuccess,
+} from "../src/features/conversations/server/conversation-engine";
 import {
   dehydrateConversationState,
   emptyConversationState,
@@ -165,7 +168,7 @@ async function runPolicyFailureTurn(params: {
 }): Promise<{
   ai: ConversationAi;
   fetchCalls: () => number;
-  result: Awaited<ReturnType<typeof receiveInboundMessage>>;
+  result: InboundSuccess;
   harness: ReturnType<typeof createPlaygroundHarness>;
   usage: Array<Record<string, unknown>>;
 }> {
@@ -180,13 +183,13 @@ async function runPolicyFailureTurn(params: {
     },
   } as never;
 
-  const result = await receiveInboundMessage(harness.deps, {
+  const result = (await receiveInboundMessage(harness.deps, {
     to: harness.business.whatsappNumber ?? "+201001111111",
     from: "+201011112222",
     text: params.message,
     receivedAt: harness.getVirtualNow().toISOString(),
     externalId: params.externalId,
-  });
+  })) as InboundSuccess;
 
   return { ai, fetchCalls, result, harness, usage };
 }
@@ -322,13 +325,13 @@ async function main(): Promise<void> {
     const harness = createPlaygroundHarness({ channel: "WHATSAPP" });
     harness.deps.ai = ai;
 
-    const result = await receiveInboundMessage(harness.deps, {
+    const result = (await receiveInboundMessage(harness.deps, {
       to: harness.business.whatsappNumber ?? "+201001111111",
       from: "+201011112222",
       text: "السلام عليكم",
       receivedAt: harness.getVirtualNow().toISOString(),
       externalId: "valid-policy-structured",
-    });
+    })) as InboundSuccess;
     const assistantMessages = harness.messages.filter(
       (message) => message.senderType === "AI",
     );
@@ -374,13 +377,13 @@ async function main(): Promise<void> {
     const harness = createPlaygroundHarness({ channel: "WHATSAPP" });
     harness.deps.ai = ai;
 
-    const result = await receiveInboundMessage(harness.deps, {
+    const result = (await receiveInboundMessage(harness.deps, {
       to: harness.business.whatsappNumber ?? "+201001111111",
       from: "+201011112222",
       text: "ما هي مواعيد العمل؟",
       receivedAt: harness.getVirtualNow().toISOString(),
       externalId: "valid-policy-provider-failure",
-    });
+    })) as InboundSuccess;
     const assistantMessages = harness.messages.filter(
       (message) => message.senderType === "AI",
     );
@@ -410,17 +413,25 @@ async function main(): Promise<void> {
     const harness = createPlaygroundHarness({ channel: "TELEGRAM" });
     harness.deps.ai = ai;
 
-    const startResult = await receiveInboundMessage(harness.deps, {
+    const startResult = (await receiveInboundMessage(harness.deps, {
       to: harness.business.whatsappNumber ?? "+201001111111",
       from: harness.customer.phone,
       text: "/start",
       receivedAt: harness.getVirtualNow().toISOString(),
       externalId: "policy-failure-start",
-    });
+    })) as InboundSuccess;
     const startMessages = harness.messages.filter(
       (message) => message.senderType === "AI",
     );
 
+    console.log("DEBUG 8a", {
+      ok: startResult.ok,
+      action: startResult.assistantAction,
+      status: startResult.conversationStatus,
+      intent: startResult.intent,
+      messages: startMessages.map((message) => message.content),
+      fetchCalls: fetchCalls(),
+    });
     check(
       "8a /start under policy failure stays a protocol reply (no AI, no failure acknowledgment)",
       startResult.ok === true &&
@@ -470,17 +481,26 @@ async function main(): Promise<void> {
       );
     }
 
-    const callbackResult = await receiveInboundMessage(harness.deps, {
+    const callbackResult = (await receiveInboundMessage(harness.deps, {
       to: harness.business.whatsappNumber ?? "+201001111111",
       from: harness.customer.phone,
       text: `fp:${offer?.token ?? "missing"}:1`,
       receivedAt: harness.getVirtualNow().toISOString(),
       externalId: "policy-failure-valid-callback",
-    });
+    })) as InboundSuccess;
     const callbackMessages = harness.messages.filter(
       (message) => message.senderType === "AI",
     );
 
+    console.log("DEBUG 8b", {
+      offer: offer?.token ?? null,
+      ok: callbackResult.ok,
+      action: callbackResult.assistantAction,
+      status: callbackResult.conversationStatus,
+      writes: harness.capturedAppointmentWrites.length,
+      messages: callbackMessages.map((message) => message.content),
+      fetchCalls: fetchCalls(),
+    });
     check(
       "8b valid offer callback under policy failure stays mechanical and correct",
       offer !== null &&
@@ -534,13 +554,13 @@ async function main(): Promise<void> {
       },
     } as never;
 
-    const result = await receiveInboundMessage(harness.deps, {
+    const result = (await receiveInboundMessage(harness.deps, {
       to: harness.business.whatsappNumber ?? "+201001111111",
       from: "+201011112222",
       text: BOOKING_MESSAGE,
       receivedAt: harness.getVirtualNow().toISOString(),
       externalId: "policy-failure-stale-telemetry",
-    });
+    })) as InboundSuccess;
 
     check(
       "9 stale/foreign telemetry is never reused for a policy-unavailable turn",
