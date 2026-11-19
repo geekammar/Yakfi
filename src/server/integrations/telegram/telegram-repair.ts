@@ -825,6 +825,7 @@ export type SwitchTelegramWebhookOutcome =
       previousWebhookUrl: string;
       webhookUrl: string;
       allowedUpdates: string[];
+      observedAllowedUpdates?: string[];
       previousAllowedUpdates: string[];
       desiredAllowedUpdates?: string[];
       exactSettingsMatch?: boolean;
@@ -1438,6 +1439,7 @@ export async function switchTelegramBotWebhook(
     previousWebhookUrl: actualCheck.normalizedUrl,
     webhookUrl: postInfo.url,
     allowedUpdates: postUpdates,
+    observedAllowedUpdates: postUpdates,
     previousAllowedUpdates: currentUpdates,
     desiredAllowedUpdates: targetUpdates,
     exactSettingsMatch: postMatches,
