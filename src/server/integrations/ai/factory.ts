@@ -11,8 +11,10 @@
  * - Secrets are env-names only via `secretRefFor(provider)` — never keys.
  * - No DB access outside `getAiPolicy`; no Domain/Engine changes.
  */
-import { deterministicConversationAi } from "@/features/conversations/server/conversation-ai";
-import type { ConversationAi } from "@/features/conversations/server/conversation-ai";
+import type {
+  ConversationAi,
+  ConversationAiExecution,
+} from "@/features/conversations/server/conversation-ai";
 import { getAiPolicy } from "@/features/platform/server/ai-policy-service";
 import type { EffectiveAiPolicy } from "@/lib/validation/platform";
 
@@ -141,9 +143,65 @@ export function adaptersFromEffectivePolicy(
 }
 
 /**
+ * The bounded, honest identity of a policy-unavailable turn. It is NOT a
+ * provider: no model, JEV request, adapter or lexical classifier exists behind
+ * it. The engine reads this identity only to keep the zero-call evidence
+ * truthful and to keep the failure distinguishable from a real provider
+ * failure.
+ */
+export const POLICY_UNAVAILABLE_AI_PROVIDER = "policy-unavailable";
+
+/** The bounded unavailable implementation, explicitly marked as no-call. */
+export type PolicyUnavailableConversationAi = ConversationAi & {
+  readonly policyUnavailable: true;
+};
+
+/**
+ * Explicit marker guard for the policy-unavailable implementation. The
+ * engine must NOT infer a no-call failure from a mutable provider name.
+ */
+export function isPolicyUnavailableAi(
+  ai: ConversationAi,
+): ai is PolicyUnavailableConversationAi {
+  return (
+    (ai as { readonly policyUnavailable?: unknown }).policyUnavailable === true
+  );
+}
+
+/**
+ * A fail-closed ConversationAi used when the platform policy cannot be
+ * resolved (read threw, persistence failed, or the stored policy is invalid).
+ *
+ * It deliberately does NOT fall back to `deterministicConversationAi`: that
+ * assistant is a lexical classifier and must never interpret a production
+ * free-form customer message after policy resolution has failed. The throw
+ * enters the engine's EXISTING safe failure path
+ * (`validated === null` → AI_FAILURE / NEED_HUMAN + the existing safe
+ * acknowledgment). No provider or JEV request is constructed or made.
+ */
+export function createPolicyUnavailableAi(): PolicyUnavailableConversationAi {
+  return {
+    providerName: POLICY_UNAVAILABLE_AI_PROVIDER,
+    policyUnavailable: true,
+    async respond(): Promise<never> {
+      throw new Error("AI_POLICY_UNAVAILABLE");
+    },
+    async respondWithExecution(): Promise<ConversationAiExecution> {
+      return {
+        response: null,
+        providerName: POLICY_UNAVAILABLE_AI_PROVIDER,
+        telemetry: null,
+        policyUnavailable: true,
+        error: new Error("AI_POLICY_UNAVAILABLE"),
+      };
+    },
+  };
+}
+
+/**
  * Resolve a ConversationAi from the live platform policy.
- * Falls back to the deterministic assistant when the policy cannot be
- * read or is invalid — the engine stays safe.
+ * A policy read/persistence failure or an invalid stored policy returns the
+ * bounded unavailable assistant — never the lexical deterministic assistant.
  */
 export async function createPolicyBackedAi(
   deps: AiFactoryDeps,
@@ -156,7 +214,7 @@ export async function createPolicyBackedAi(
   } catch {
     effective = null;
   }
-  if (!effective) return deterministicConversationAi;
+  if (!effective) return createPolicyUnavailableAi();
 
   const { primary, secondary, fallbackEnabled } = adaptersFromEffectivePolicy(
     effective,

@@ -88,9 +88,9 @@ export const COPY_CLASSIFICATION_FILTER_LABELS: Readonly<
  *   the current operational path can emit.
  * - AUTHORITATIVE_DATA_PRESENTATION — server-rendered business data, not a
  *   response template and not model-authored prose.
- * - LEGACY_ONLY_PATH — wording reachable only through a legacy/fallback
- *   assistant (including the policy-read failure path), not the default
- *   structured path.
+ * - LEGACY_ONLY_PATH — wording reachable only through an explicit
+ *   legacy/non-structured caller, not the default structured path or the
+ *   fail-closed policy-failure path.
  * - UNUSED_CODE — the symbol exists but no caller emits it.
  * - UNRESOLVED — evidence is insufficient to classify safely.
  */

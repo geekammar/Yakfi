@@ -17,11 +17,13 @@
 > `src/features/conversations/server/ai-contract.ts` without touching the
 > engine or domain, and are wired as the engine default through the runtime
 > `PlatformAiPolicy` (DECISIONS #44; `createPolicyBackedAi` in
-> `conversation-engine.ts`), with `deterministicConversationAi` as the safe
-> fallback when the policy is unreadable. `PROMPTS.md` is now a catalog only
-> (id / purpose / file path / runtime consumer) — it carries no prompt
-> bodies; `pnpm check:ai-prompts` remains the deterministic, offline,
-> in-memory guard (no DB, no network, no secrets).
+> `conversation-engine.ts`). When the policy is unreadable or invalid, the
+> factory fails closed through a bounded unavailable assistant (zero
+> provider/JEV calls, existing `AI_FAILURE` / `NEED_HUMAN` safe path) and
+> never selects the lexical `deterministicConversationAi`. `PROMPTS.md` is
+> now a catalog only (id / purpose / file path / runtime consumer) — it
+> carries no prompt bodies; `pnpm check:ai-prompts` remains the
+> deterministic, offline, in-memory guard (no DB, no network, no secrets).
 
 ## What lives where
 

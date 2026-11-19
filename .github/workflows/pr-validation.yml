@@ -63,6 +63,8 @@ jobs:
           pnpm check:test-bot-recovery
           pnpm test:health-readonly
           pnpm check:provider-failure-lexical-authority
+          pnpm check:policy-failure
+          pnpm check:policy-failure-scope
 
       - name: AI prompt contract check
         run: pnpm check:ai-prompts
