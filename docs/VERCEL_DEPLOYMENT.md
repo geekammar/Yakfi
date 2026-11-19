@@ -274,9 +274,10 @@ deployment log (Builds → failed deployment → inspect) cover the rest.
 - **Scope boundary:** keep the existing Neon PostgreSQL database and existing
   Telegram bots. Add **no** Render Postgres, Redis/Key-Value, worker, queue,
   persistent disk, Docker container, or Cron Job.
-- **Unverified capacity note:** `512 MB` RAM runtime headroom under concurrent
-  SSR + Prisma + AI/Telegram turns remains **unverified** until measured live on
-  Render Metrics.
+- **Capacity note:** the reviewer previously observed approximately **272–281
+  MiB of a 512 MiB limit over about 46 minutes**. This is a historical idle
+  baseline, not workload capacity. Headroom under concurrent SSR + Prisma +
+  AI/Telegram turns remains **unverified** until a workload test.
 - **Owner billing verification (before first deploy):** Ammar verifies in Render
   Dashboard → Billing:
   1. Exact remaining balance of the $50 promotional credit and its exact expiry
@@ -469,21 +470,36 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
    - **Render-targeted cutover tool (manual only):**
      `.github/workflows/render-telegram-cutover.yml` +
      `scripts/render-telegram-cutover.ts` expose `operation=preflight` (default,
-     read-only) and `operation=apply` (explicit). The destination is pinned to
+     read-only), `operation=apply` (explicit), and `operation=reconcile`
+     (explicit guarded secret reset). The destination is pinned to
      `https://yakfi.onrender.com/api/telegram/webhook`; fixed
      workspace/service, Business/Connection/Bot, selected active DB, exact
      checkout/deployed SHA, and expected version are required. Preflight
      resolves the selected bot credential from the selected DB/master key,
      verifies `getMe`, calls `getWebhookInfo` (URL, pending count, observation
-     time, allowed_updates, last error), and verifies the signed Render
-     `/api/operator/cutover-readiness` proof. Apply requires a fresh preflight,
-     `pending_update_count === 0`, the expected current URL, exact
-     `allowed_updates: ["message", "callback_query"]`, never enables
-     `drop_pending_updates`, and handles already-at-destination as a no-op.
-     Unknown/non-zero backlog or any failed identity/readiness check blocks
-     apply. Do **not** use the legacy `cutover-main-runtime-*` Vercel operations
-     for Render. The workflow must exist on `main` before its first manual
-     dispatch; GitHub rejects dispatch from a feature branch.
+     time, observed vs desired allowed_updates, last error), and verifies the
+     signed Render `/api/operator/cutover-readiness` proof. Apply requires a
+     fresh preflight, `pending_update_count === 0`, the expected current URL,
+     exact `allowed_updates: ["message", "callback_query"]`, never enables
+     `drop_pending_updates`, and treats a genuinely exact already-at-destination
+     registration as a zero-write no-op. A matching URL with extra/missing
+     allowed_updates is blocked as `ALREADY_AT_DESTINATION_SETTINGS_MISMATCH`,
+     not treated as exact readiness. When exact `allowedUpdates` is supplied,
+     post-apply verification checks the Telegram-observed set exactly and
+     rejects extra/missing/malformed sets. Unknown/non-zero backlog or any
+     failed identity/readiness check blocks apply. Do **not** use the legacy
+     `cutover-main-runtime-*` Vercel operations for Render. The workflow must
+     exist on `main` before its first manual dispatch; GitHub rejects dispatch
+     from a feature branch.
+   - **Explicit reconciliation (`operation=reconcile`):** requires a fresh
+     preflight, Render current URL, zero backlog, resolved identity and signed
+     runtime readiness, then resets the Telegram webhook secret in place and
+     persists the new DB hash with exact allowed_updates. It is never automatic
+     after an uncertain failure. `getWebhookInfo` cannot reveal the webhook
+     secret; a stored hash alone does not prove it matches Telegram; signed
+     readiness proves bot credential resolution, not webhook secret
+     synchronization. A real delivery test is still required for delivery
+     acceptance.
    - **Partial-failure boundary:** Telegram `setWebhook` and PostgreSQL
      `webhook_secret_hash` persistence are not atomic. On partial or ambiguous
      failure, inspect `getWebhookInfo` and the DB hash, then use the reviewed

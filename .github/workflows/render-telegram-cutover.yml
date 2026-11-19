@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: "Read-only preflight or explicit apply"
+        description: "Read-only preflight, explicit apply, or explicit reconcile"
         required: true
         type: choice
         default: preflight

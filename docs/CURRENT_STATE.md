@@ -44,17 +44,25 @@
   service/workspace/region verification, calls `getWebhookInfo`, verifies signed
   Render runtime readiness, requires `pending_update_count === 0` for apply,
   never uses `drop_pending_updates`, and reports partial failures without blind
-  retry.
-  CI run `44419719540` passed the required gate with the new checks **18/18**.
-  Manual `workflow_dispatch` from the candidate branch is unavailable until
-  the workflow exists on `main` (GitHub returns 404); no live read-only
-  preflight was executed from the candidate and no local secret workaround was
-  used. No live webhook change was made.
+  retry. Already-at-destination reports Telegram-observed vs desired
+  `allowed_updates` separately; a URL match with any extra/missing set is
+  blocked, not treated as exact readiness. An explicit `operation=reconcile`
+  is the guarded in-place secret reset/corrective path; it is never automatic.
+  When exact `allowedUpdates` is supplied, post-apply verification checks the
+  observed set exactly and returns a truthful partial failure on mismatch.
+  CI run `44511875590` passed the code HEAD with **26/26** cutover checks and
+  27/27 Render migration checks. Manual `workflow_dispatch` from the candidate
+  branch is unavailable until the workflow exists on `main` (GitHub returns
+  404); no live read-only preflight was executed from the candidate and no
+  local secret workaround was used. No live webhook change was made.
 - **Not done / not verified:** live `getWebhookInfo`/pending backlog via the new
   workflow (candidate is not on `main` until merge), Telegram webhook cutover,
-  Telegram messages, live product acceptance, and `512 MB` capacity measurement.
-  The Render Blueprint ownership/adoption remains unestablished. PR88 remains
-  separate. Historical R5/R6/Y83 and QA249/QA250 evidence is unchanged.
+  Telegram messages, live product acceptance, and workload capacity testing.
+  The reviewer previously observed approximately **272–281 MiB of a 512 MiB
+  limit over about 46 minutes**; this is a historical idle baseline, not proof
+  of workload capacity. The Render Blueprint ownership/adoption remains
+  unestablished. PR88 remains separate. Historical R5/R6/Y83 and QA249/QA250
+  evidence is unchanged.
 
 ## 00. Prior acceptance evidence completion — 16 November 2026
 
