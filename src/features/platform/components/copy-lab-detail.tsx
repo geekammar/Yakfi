@@ -823,6 +823,9 @@ function RuntimeCoverageBlock({ entry }: { entry: CopyRegistryEntry }) {
         <p className="text-xs leading-relaxed text-foreground">
           {coverage.overrideConnectionSummary}
         </p>
+        <p className="text-muted-foreground text-xs leading-relaxed">
+          {coverage.operationalNote}
+        </p>
       </div>
     </div>
   );
