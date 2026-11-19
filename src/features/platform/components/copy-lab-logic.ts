@@ -432,9 +432,7 @@ export const EFFECTIVE_SOURCE_LABELS: Readonly<
 // store only. Only `welcome.intro` is both operational and override-connected.
 
 export type CopyOverrideConnection =
-  | "CONNECTED"
-  | "NOT_CONNECTED"
-  | "NOT_APPLICABLE";
+  "CONNECTED" | "NOT_CONNECTED" | "NOT_APPLICABLE";
 
 export type CopyRuntimeCoverage = {
   /** Whether the current default path emits this wording at all. */
