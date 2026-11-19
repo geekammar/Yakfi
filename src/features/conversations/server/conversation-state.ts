@@ -1098,6 +1098,89 @@ export function withPresentedOffer(
   };
 }
 
+/**
+ * Drop inherited booking temporal facts that can no longer be booked as-is.
+ *
+ * A "tomorrow" supplied yesterday must not become a PAST_DATE rejection for a
+ * NEW request that did not state a date, and an expired offer must not stay
+ * selectable. ONLY the inherited state is pruned; an explicit date/temporal
+ * proposal on the CURRENT customer turn is never removed here, so the existing
+ * server validation still rejects a genuinely explicit past date truthfully.
+ *
+ * `todayIso` is the business-timezone local date (never a UTC assumption).
+ * Pure and total: no clock, no I/O, no model.
+ */
+export function pruneExpiredBookingTemporalFacts(
+  state: ConversationState,
+  todayIso: string,
+): ConversationState {
+  const date = state.knownFacts.date;
+  const dateIsExpired =
+    typeof date === "string" && isValidIsoCalendarDate(date) && date < todayIso;
+
+  const range = state.knownFacts.dateRange;
+  const rangeIsExpired =
+    range != null &&
+    isValidIsoCalendarDate(range.startDate) &&
+    isValidIsoCalendarDate(range.endDate) &&
+    range.endDate < todayIso;
+
+  const offer = state.offer;
+  const offerDate =
+    offer && "date" in offer && typeof offer.date === "string"
+      ? offer.date
+      : null;
+  const dateOfferIsExpired =
+    offer?.kind === "DATE" &&
+    offer.status === "ACTIVE" &&
+    (Boolean(
+      offer.range &&
+      isValidIsoCalendarDate(offer.range.startDate) &&
+      isValidIsoCalendarDate(offer.range.endDate) &&
+      offer.range.endDate < todayIso,
+    ) ||
+      (offer.options.length > 0 &&
+        offer.options.every(
+          (option) =>
+            isValidIsoCalendarDate(option.date) && option.date < todayIso,
+        )));
+  const offerIsExpired =
+    offer != null &&
+    offer.status === "ACTIVE" &&
+    (dateOfferIsExpired ||
+      (offerDate != null &&
+        isValidIsoCalendarDate(offerDate) &&
+        offerDate < todayIso));
+
+  if (!dateIsExpired && !rangeIsExpired && !offerIsExpired) {
+    return state;
+  }
+
+  let knownFacts = state.knownFacts;
+  if (dateIsExpired) {
+    const { date: _droppedDate, ...keptFacts } = knownFacts;
+    void _droppedDate;
+    knownFacts = keptFacts;
+  }
+  if (rangeIsExpired) {
+    const { dateRange: _droppedRange, ...keptFacts } = knownFacts;
+    void _droppedRange;
+    knownFacts = keptFacts;
+  }
+
+  return {
+    ...state,
+    knownFacts,
+    selectedDate: dateIsExpired ? null : state.selectedDate,
+    dateRange: rangeIsExpired ? null : state.dateRange,
+    offer:
+      offerIsExpired && offer
+        ? ({ ...offer, status: "INVALIDATED" } as BookingOffer)
+        : state.offer,
+    pendingOffer: offerIsExpired ? null : state.pendingOffer,
+  };
+}
+
 /** Move the current offer to a terminal/claimed status (no-op if none). */
 export function withOfferStatus(
   state: ConversationState,

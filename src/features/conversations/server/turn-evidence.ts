@@ -116,6 +116,16 @@ export type TurnEvidence = {
   readonly outboundSendDelivered: boolean | null;
   /** Bounded typed outbound transport failure code when delivery failed. */
   readonly outboundDeliveryErrorCode: string | null;
+  /**
+   * Bounded secret-safe diagnostics that distinguish a network uncertainty
+   * (no response) from a provider HTTP rejection/rate limit, a malformed
+   * provider payload, and a pre-send connection/credential failure.
+   */
+  readonly outboundDeliveryFailureStage: string | null;
+  /** Validated provider HTTP status when the failure was an HTTP response. */
+  readonly outboundDeliveryHttpStatus: number | null;
+  /** Provider-directed retry delay, bounded when the provider supplied one. */
+  readonly outboundDeliveryRetryAfterSeconds: number | null;
   /** Bounded per-attempt execution and usage records across retries and fallback. */
   readonly executionAttempts: readonly TurnExecutionAttempt[] | null;
   /** Optional sanitized provider error classification for failed turn (CONFIG_ERROR, RETRYABLE, etc.). */
@@ -196,6 +206,9 @@ export type TurnEvidenceInput = {
   readonly delivery?: {
     readonly delivered: boolean;
     readonly errorCode?: string;
+    readonly failureStage?: string;
+    readonly httpStatus?: number;
+    readonly retryAfterSeconds?: number;
   } | null;
 };
 
@@ -317,6 +330,10 @@ export function buildTurnEvidence(
       input.delivery !== null && input.delivery !== undefined,
     outboundSendDelivered: input.delivery ? input.delivery.delivered : null,
     outboundDeliveryErrorCode: input.delivery?.errorCode ?? null,
+    outboundDeliveryFailureStage: input.delivery?.failureStage ?? null,
+    outboundDeliveryHttpStatus: input.delivery?.httpStatus ?? null,
+    outboundDeliveryRetryAfterSeconds:
+      input.delivery?.retryAfterSeconds ?? null,
     executionAttempts: observability?.executionAttempts ?? null,
     errorCode:
       observability?.errorCode ??
@@ -400,6 +417,7 @@ export const TURN_EVIDENCE_ALLOWED_STRING_FIELDS = new Set<string>([
   "knowledgeGapCategory",
   "finalOutcome",
   "outboundDeliveryErrorCode",
+  "outboundDeliveryFailureStage",
   "emittedAt",
   // CORE-04A: Bounded execution attempt and cost completeness closed keys
   "status",

@@ -269,6 +269,32 @@ function exportTurnEvidenceOtlp(record: TurnEvidence, endpoint: string): void {
           },
         ]
       : []),
+    ...(record.outboundDeliveryFailureStage !== null
+      ? [
+          {
+            key: "flowpilot.outbound_delivery_failure_stage",
+            value: { stringValue: record.outboundDeliveryFailureStage },
+          },
+        ]
+      : []),
+    ...(record.outboundDeliveryHttpStatus !== null
+      ? [
+          {
+            key: "flowpilot.outbound_delivery_http_status",
+            value: { intValue: String(record.outboundDeliveryHttpStatus) },
+          },
+        ]
+      : []),
+    ...(record.outboundDeliveryRetryAfterSeconds !== null
+      ? [
+          {
+            key: "flowpilot.outbound_delivery_retry_after_seconds",
+            value: {
+              intValue: String(record.outboundDeliveryRetryAfterSeconds),
+            },
+          },
+        ]
+      : []),
     // PROMPT-AI-JEV-03D — the DISJOINT shadow slot (OPTION E), exported only
     // when a shadow evaluation ran this turn. Closed machine keys only; the
     // shadowModelCallCount attribute is the experimental counter that must

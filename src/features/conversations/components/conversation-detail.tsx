@@ -817,6 +817,26 @@ export function ConversationDetail({
           );
         }
 
+        // Reconciliation by authoritative identity only. If this session kept
+        // an optimistic row under the attempt id, replace it with the persisted
+        // Message.id; when no persisted id is available, drop the local-only row
+        // and let the next server snapshot supply the confirmed message. Never
+        // match by sender/text/time.
+        optimisticMessageIdsRef.current.delete(attempt.attemptId);
+        if (pendingMessageId === attempt.attemptId) setPendingMessageId(null);
+        setData((current) => ({
+          ...current,
+          messages: result.messageId
+            ? replaceConversationMessageId(
+                current.messages,
+                attempt.attemptId,
+                result.messageId,
+              )
+            : current.messages.filter(
+                (message) => message.id !== attempt.attemptId,
+              ),
+        }));
+
         // Repro C & Draft Ownership Check:
         // Only clear stored draft if ownership can be PROVEN to belong to this attempt!
         const currentStoredDraft = getStoredDraft(
@@ -1753,6 +1773,19 @@ export function ConversationDetail({
                             {formatMessageTime(message.createdAt)}
                           </time>
                         )}
+                        {ai && message.deliveryStatus === "FAILURE" ? (
+                          <span
+                            role="status"
+                            aria-label="لم يتم تأكيد وصول الرد إلى العميل"
+                            className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-1.5 py-0.5 font-medium text-destructive"
+                          >
+                            <AlertCircleIcon
+                              aria-hidden
+                              className="size-3 shrink-0"
+                            />
+                            لم يتم تأكيد وصول الرد
+                          </span>
+                        ) : null}
                       </div>
                       {message.displayText ? (
                         <div className="mt-1 space-y-1.5">

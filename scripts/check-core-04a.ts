@@ -1222,6 +1222,9 @@ async function runSuite(): Promise<void> {
       harness.business.id,
     );
     const nowMech = new Date();
+    const mechDate = new Date(nowMech.getTime() + 2 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
     const testOffer = {
       id: "off-mech-1",
       token: "off00001",
@@ -1231,7 +1234,7 @@ async function runSuite(): Promise<void> {
       serviceId: services[0]!.id,
       serviceName: services[0]!.name,
       serviceSource: "CUSTOMER" as const,
-      date: "2026-10-25",
+      date: mechDate,
       providerId: null,
       followUpRequestId: null,
       shownCount: 1,
@@ -1240,8 +1243,8 @@ async function runSuite(): Promise<void> {
           index: 1,
           providerId: "prov-1",
           displayName: "د. سارة",
-          startAt: "2026-10-25T10:00",
-          endAt: "2026-10-25T10:30",
+          startAt: `${mechDate}T10:00`,
+          endAt: `${mechDate}T10:30`,
         },
       ],
       issuedAt: nowMech.toISOString(),
@@ -1697,6 +1700,9 @@ async function runSuite(): Promise<void> {
       harnessP.business.id,
     );
     const nowP = new Date();
+    const pDate = new Date(nowP.getTime() + 2 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
     const testOfferP = {
       id: "off-p-1",
       token: "off00002",
@@ -1706,7 +1712,7 @@ async function runSuite(): Promise<void> {
       serviceId: servicesP[0]!.id,
       serviceName: servicesP[0]!.name,
       serviceSource: "CUSTOMER" as const,
-      date: "2026-10-25",
+      date: pDate,
       providerId: null,
       followUpRequestId: null,
       shownCount: 1,
@@ -1715,8 +1721,8 @@ async function runSuite(): Promise<void> {
           index: 1,
           providerId: "prov-1",
           displayName: "د. سارة",
-          startAt: "2026-10-25T10:00",
-          endAt: "2026-10-25T10:30",
+          startAt: `${pDate}T10:00`,
+          endAt: `${pDate}T10:30`,
         },
       ],
       issuedAt: nowP.toISOString(),

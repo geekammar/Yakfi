@@ -7,6 +7,22 @@
 > Render app is technically ready; Telegram cutover and live product acceptance
 > have not been performed; PR88 remains open.
 
+## 0C. Booking/delivery/transcript repair candidate — 19 November 2026
+
+- **Baseline:** verified `main` `9e887dfccbaa2f990861abc75518f78d1c9fb223`
+  (`0.79.18`, PR #92 merged). PR #88 and Rabet are untouched.
+- **Draft candidate `0.79.19` (one PR):** expired inherited booking dates are
+  no longer resumed into a new unstated-date request (business-local Cairo
+  boundary); explicit current-turn past dates are still rejected; outbound
+  transport diagnostics now separate network uncertainty, HTTP rejection/rate
+  limit and malformed payload, and a failed assistant delivery is shown
+  truthfully from the existing OUTBOUND_MESSAGE usage evidence; accepted staff
+  replies return the persisted `Message.id` (provider id kept separate), so a
+  status recheck or poll can no longer create a second identical bubble.
+- **Not claimed:** the exact 19 November historical delivery/provider cause is
+  unavailable in retained evidence; no live retest, deploy, migration, Telegram
+  send or paid AI call was performed. Required CI evidence is on the PR HEAD.
+
 ## 0. Live Render readiness & configuration alignment — 18 November 2026
 
 - **Current `main` baseline:** `0.79.17`, merge commit

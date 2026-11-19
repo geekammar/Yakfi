@@ -28,4 +28,42 @@ export class UsageRepository {
   async countByBusiness(businessId: string): Promise<number> {
     return db.usageRecord.count({ where: { businessId } });
   }
+
+  /**
+   * Read-only delivery outcomes for a conversation's assistant messages.
+   *
+   * The OUTBOUND_MESSAGE usage record is the existing append-only delivery
+   * evidence; it is read here to present truthful per-message delivery state
+   * without mutating the immutable Message row. Tenant-scoped by `businessId`
+   * and bounded to the caller-supplied message ids. Later records win, so an
+   * operator sees the latest recorded outcome for each message id.
+   */
+  async listOutboundDeliveryStatuses(input: {
+    businessId: string;
+    conversationId: string;
+    messageIds: readonly string[];
+  }): Promise<Map<string, "SUCCESS" | "FAILURE">> {
+    const messageIds = [...new Set(input.messageIds)];
+    if (messageIds.length === 0) return new Map();
+    const rows = await db.usageRecord.findMany({
+      where: {
+        businessId: input.businessId,
+        conversationId: input.conversationId,
+        kind: "OUTBOUND_MESSAGE",
+        messageId: { in: messageIds },
+      },
+      select: { messageId: true, status: true, occurredAt: true },
+      orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }],
+    });
+    const statuses = new Map<string, "SUCCESS" | "FAILURE">();
+    for (const row of rows) {
+      if (
+        row.messageId &&
+        (row.status === "SUCCESS" || row.status === "FAILURE")
+      ) {
+        statuses.set(row.messageId, row.status);
+      }
+    }
+    return statuses;
+  }
 }

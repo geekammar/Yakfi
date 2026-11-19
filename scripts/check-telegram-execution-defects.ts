@@ -956,6 +956,23 @@ async function main(): Promise<void> {
           status: 200,
         }),
     });
+    const rateLimitedTransport = makeRealTransport({
+      handler: async () =>
+        new Response(
+          JSON.stringify({
+            ok: false,
+            error_code: 429,
+            description: "Too Many Requests: retry after 7",
+            parameters: { retry_after: 7 },
+          }),
+          { status: 429 },
+        ),
+    });
+    const networkTransport = makeRealTransport({
+      handler: async () => {
+        throw new TypeError("fetch failed");
+      },
+    });
     const permanentHarness = createTestHarness({
       conversationId: "conv-delivery-permanent",
       transport: permanentTransport.transport,
@@ -968,9 +985,19 @@ async function main(): Promise<void> {
       conversationId: "conv-delivery-malformed",
       transport: malformedTransport.transport,
     });
+    const rateLimitedHarness = createTestHarness({
+      conversationId: "conv-delivery-rate-limited",
+      transport: rateLimitedTransport.transport,
+    });
+    const networkHarness = createTestHarness({
+      conversationId: "conv-delivery-network",
+      transport: networkTransport.transport,
+    });
     const permanentTurn = await permanentHarness.sendInbound("مرحبا");
     const transientTurn = await transientHarness.sendInbound("مرحبا");
     const malformedTurn = await malformedHarness.sendInbound("مرحبا");
+    const rateLimitedTurn = await rateLimitedHarness.sendInbound("مرحبا");
+    const networkTurn = await networkHarness.sendInbound("مرحبا");
     const permanentDelivery =
       permanentTurn.ok && !permanentTurn.duplicate
         ? permanentTurn.delivery
@@ -983,6 +1010,12 @@ async function main(): Promise<void> {
       malformedTurn.ok && !malformedTurn.duplicate
         ? malformedTurn.delivery
         : null;
+    const rateLimitedDelivery =
+      rateLimitedTurn.ok && !rateLimitedTurn.duplicate
+        ? rateLimitedTurn.delivery
+        : null;
+    const networkDelivery =
+      networkTurn.ok && !networkTurn.duplicate ? networkTurn.delivery : null;
     const permanentOutcome = mapEngineResultToTelegramOutcome(
       permanentTurn as any,
     );
@@ -997,6 +1030,11 @@ async function main(): Promise<void> {
       permanentDelivery?.errorCode === "PERMANENT_TRANSPORT_FAILURE" &&
         transientDelivery?.errorCode === "TRANSIENT_TRANSPORT_FAILURE" &&
         malformedDelivery?.errorCode === "MALFORMED_PROVIDER_PAYLOAD" &&
+        permanentDelivery?.failureStage === "PROVIDER_HTTP" &&
+        permanentDelivery?.httpStatus === 400 &&
+        transientDelivery?.failureStage === "PROVIDER_HTTP" &&
+        transientDelivery?.httpStatus === 500 &&
+        malformedDelivery?.failureStage === "PROVIDER_PAYLOAD" &&
         permanentOutcome.ok === false &&
         permanentOutcome.error === "PERMANENT_TRANSPORT_FAILURE" &&
         transientOutcome.ok === false &&
@@ -1006,6 +1044,21 @@ async function main(): Promise<void> {
         permanentTransport.calls.length === 1 &&
         transientTransport.calls.length === 1 &&
         malformedTransport.calls.length === 1,
+    );
+
+    check(
+      "3b.3b. Rate limit and network uncertainty remain distinct bounded diagnostics",
+      rateLimitedDelivery?.delivered === false &&
+        rateLimitedDelivery.errorCode === "TRANSIENT_TRANSPORT_FAILURE" &&
+        rateLimitedDelivery.failureStage === "PROVIDER_HTTP" &&
+        rateLimitedDelivery.httpStatus === 429 &&
+        rateLimitedDelivery.retryAfterSeconds === 7 &&
+        networkDelivery?.delivered === false &&
+        networkDelivery.errorCode === "TRANSIENT_TRANSPORT_FAILURE" &&
+        networkDelivery.failureStage === "NETWORK" &&
+        networkDelivery.httpStatus === undefined &&
+        rateLimitedTransport.calls.length === 1 &&
+        networkTransport.calls.length === 1,
     );
 
     const RAW_THROWN_ERROR = "RAW_PROVIDER_BODY_SHOULD_NOT_LEAK";
@@ -1053,7 +1106,10 @@ async function main(): Promise<void> {
         knowledgeGap: null,
         delivery: {
           delivered: false,
-          errorCode: "UNAUTHORIZED_CREDENTIALS",
+          errorCode: "TRANSIENT_TRANSPORT_FAILURE",
+          failureStage: "PROVIDER_HTTP",
+          httpStatus: 429,
+          retryAfterSeconds: 7,
         },
       },
       {
@@ -1063,11 +1119,15 @@ async function main(): Promise<void> {
       },
     );
     check(
-      "3b.5. Turn evidence records the bounded outbound delivery error code",
+      "3b.5. Turn evidence records the bounded outbound delivery code and diagnostics",
       failedDeliveryEvidence.outboundSendAttempted === true &&
         failedDeliveryEvidence.outboundSendDelivered === false &&
         failedDeliveryEvidence.outboundDeliveryErrorCode ===
-          "UNAUTHORIZED_CREDENTIALS",
+          "TRANSIENT_TRANSPORT_FAILURE" &&
+        failedDeliveryEvidence.outboundDeliveryFailureStage ===
+          "PROVIDER_HTTP" &&
+        failedDeliveryEvidence.outboundDeliveryHttpStatus === 429 &&
+        failedDeliveryEvidence.outboundDeliveryRetryAfterSeconds === 7,
     );
   }
 
