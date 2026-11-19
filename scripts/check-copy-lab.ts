@@ -73,9 +73,9 @@ import type {
  *                               still provider/network/send-free
  *   P  COMPONENT LIFECYCLE     — mounted React lifecycle test in jsdom against
  *                               mocked server boundary
- *   Q  RUNTIME COVERAGE        — explicit distinction between copy store resolution
- *                               and conversation engine consumption (welcome.intro
- *                               only; honest stored resolution wording)
+ *   Q  RUNTIME ALIGNMENT       — separate runtime relevance from override
+ *                               connection (welcome.intro only is override-
+ *                               connected; current/legacy/unused are distinct)
  *
  * Run: pnpm check:copy-lab
  */
@@ -764,6 +764,31 @@ async function main(): Promise<void> {
       WHATSAPP_TRANSPORT_FILE,
     ].some((f) => read(f).includes("conversation-copy")),
   );
+
+  // I3 — the Telegram customer-start constant is declared but has no caller.
+  // The verified inventory therefore classifies it UNUSED_CODE; this guard
+  // fails if a future change starts emitting it without updating the Lab
+  // classification and its runtime evidence.
+  const startWelcomeRefs: string[] = [];
+  for (const file of walkTs(path.join(process.cwd(), "src"))) {
+    const rel = path.relative(process.cwd(), file).split(path.sep).join("/");
+    const count = (read(rel).match(/\bCUSTOMER_START_WELCOME\b/g) ?? []).length;
+    for (let index = 0; index < count; index += 1) {
+      startWelcomeRefs.push(rel);
+    }
+  }
+  const executableStartWelcomeRefs = startWelcomeRefs.filter(
+    (rel) => !rel.startsWith(REGISTRY_DIR),
+  );
+  check(
+    "I3. ثابت ترحيب Telegram معلن مرة واحدة بلا مستدعٍ تنفيذي — مصنّف كنص غير مستخدم بأدلة",
+    executableStartWelcomeRefs.length === 1 &&
+      executableStartWelcomeRefs[0] === TELEGRAM_WEBHOOK_FILE,
+  );
+  if (executableStartWelcomeRefs.length > 0) {
+    for (const rel of new Set(executableStartWelcomeRefs))
+      console.error(`   start-welcome ref: ${rel}`);
+  }
 
   // ── J. Validation contract (UX-LAB-01B) ────────────────────────────────
   //
@@ -2395,7 +2420,9 @@ async function main(): Promise<void> {
     collectPreviewValues,
     demoPlaceholderValues,
     filterCopyEntries,
+    getCopyRuntimeRelevance,
     groupCopyEntriesByCategory,
+    isOperationalRuntimeRelevance,
   } = await import("../src/features/platform/components/copy-lab-logic");
 
   // N1 — the platform route exists, renders the browser, and is guarded by the
@@ -2419,17 +2446,51 @@ async function main(): Promise<void> {
       labUiSources.every((src) => !/defaultText\s*:/.test(src)),
   );
 
-  // N3 — the default view represents ALL 48 entries, in registry order, with
-  // no key lost, added, or reordered by the projection.
+  // N3 — the explicit "all entries" scope represents ALL 48 entries, in
+  // registry order, with no key lost, added, or reordered by the projection.
   const labAll = filterCopyEntries(COPY_REGISTRY, {
     search: "",
     classification: "ALL",
+    scope: "ALL",
   });
   check(
-    "N3. العرض الافتراضي يمثّل كل المفاتيح الـ48 بنفس ترتيب السجل (بدون فقد أو إضافة)",
+    "N3. نطاق «كل السجل» يمثّل كل المفاتيح الـ48 بنفس ترتيب السجل (بدون فقد أو إضافة)",
     labAll.length === COPY_REGISTRY.length &&
       COPY_REGISTRY.length === 48 &&
       labAll.every((entry, i) => entry.key === COPY_REGISTRY[i]!.key),
+  );
+
+  // N3b — the DEFAULT operational scope includes only wording produced by the
+  // current path (plus authoritative-data presentation), and hides every
+  // legacy/fallback, unused, and unresolved entry behind the explicit ALL
+  // scope. Counts are evidence-backed, not "47 unconnected".
+  const labOperational = filterCopyEntries(COPY_REGISTRY, {
+    search: "",
+    classification: "ALL",
+    scope: "OPERATIONAL",
+  });
+  const operationalKeys = new Set(labOperational.map((e) => e.key));
+  const expectedOperational = COPY_REGISTRY.filter((e) =>
+    isOperationalRuntimeRelevance(getCopyRuntimeRelevance(e.key)),
+  );
+  const hiddenLegacy = ["greeting.invite", "booking.request"];
+  const hiddenUnused = ["channel.telegram.start_welcome"];
+  check(
+    "N3b. العرض الافتراضي التشغيلي يعرض النصوص الحالية فقط (38) ويخفي المسار القديم وغير المستخدم خلف «كل السجل»",
+    labOperational.length === 38 &&
+      expectedOperational.length === 38 &&
+      labOperational.every((e) =>
+        isOperationalRuntimeRelevance(getCopyRuntimeRelevance(e.key)),
+      ) &&
+      hiddenLegacy.every((key) => !operationalKeys.has(key)) &&
+      hiddenUnused.every((key) => !operationalKeys.has(key)) &&
+      getCopyRuntimeRelevance("booking.offer") ===
+        "CURRENT_OPERATIONAL_TEMPLATE" &&
+      getCopyRuntimeRelevance("identity.reply") ===
+        "AUTHORITATIVE_DATA_PRESENTATION" &&
+      getCopyRuntimeRelevance("greeting.ack.salam") === "LEGACY_ONLY_PATH" &&
+      getCopyRuntimeRelevance("channel.telegram.start_welcome") ===
+        "UNUSED_CODE",
   );
 
   // N4 — classification counts are derived from the registry, never a
@@ -2452,13 +2513,20 @@ async function main(): Promise<void> {
   const labSearch = filterCopyEntries(COPY_REGISTRY, {
     search: "booking",
     classification: "ALL",
+    scope: "ALL",
   });
   const labProtectedOnly = filterCopyEntries(COPY_REGISTRY, {
     search: "",
     classification: "PROTECTED_COPY",
+    scope: "ALL",
+  });
+  const labOperationalSearch = filterCopyEntries(COPY_REGISTRY, {
+    search: "booking",
+    classification: "ALL",
+    scope: "OPERATIONAL",
   });
   check(
-    "N5. البحث/التصفية نقي: مصفوفة جديدة ولا يغيّر السجل (الطول والترتيب والمرجع)، ونتيجته مجموعة جزئية",
+    "N5. البحث/التصفية نقي: مصفوفة جديدة ولا يغيّر السجل (الطول والترتيب والمرجع)، والنطاق التشغيلي لا يسرب القديم",
     labAll !== beforeFilter &&
       beforeFilter.length === 48 &&
       labAll.every((entry, i) => entry === beforeFilter[i]) &&
@@ -2466,7 +2534,10 @@ async function main(): Promise<void> {
       labSearch.length < 48 &&
       labSearch.every((e) => e.key.includes("booking")) &&
       labProtectedOnly.length === 4 &&
-      labProtectedOnly.every((e) => e.classification === "PROTECTED_COPY"),
+      labProtectedOnly.every((e) => e.classification === "PROTECTED_COPY") &&
+      labOperationalSearch.length > 0 &&
+      labOperationalSearch.length < labSearch.length &&
+      !labOperationalSearch.some((e) => e.key === "booking.request"),
   );
 
   // N6 — grouping is pure + lossless: the registry interleaves its categories
@@ -2739,11 +2810,14 @@ async function main(): Promise<void> {
     "<HistorySection",
     "publishCopyOverrideAction(",
     "resetCopyOverrideAction(",
-    "restoreCopyOverrideAction(",
   ];
-  const surfacesGuarded = mutationSurfaces.every(
-    (surface) => labDetailSource.indexOf(surface) > firstGuard,
-  );
+  const restoreHandlerPresent =
+    /function requestRestore\(/.test(labDetailSource) &&
+    /function confirmRestore\(/.test(labDetailSource);
+  const surfacesGuarded =
+    mutationSurfaces.every(
+      (surface) => labDetailSource.indexOf(surface) > firstGuard,
+    ) && restoreHandlerPresent;
   const protectedBranchStart = labDetailSource.indexOf("{isProtected ? (");
   const protectedBranchEnd = labDetailSource.indexOf(
     ") : (",
@@ -3349,7 +3423,7 @@ async function main(): Promise<void> {
     );
   }
 
-  // ── Q — Runtime coverage presentation & honest stored resolution ─────────
+  // ── Q — Runtime relevance vs override connection (separate) ──────────────
   const {
     getCopyRuntimeCoverage,
     isKeyConnectedToRuntime,
@@ -3358,7 +3432,8 @@ async function main(): Promise<void> {
     PLATFORM_OVERRIDE_SCOPE_NOTE: SCOPE_NOTE,
   } = await import("../src/features/platform/components/copy-lab-logic");
 
-  // Q1: Exactly welcome.intro is connected; all other 47 keys are NOT connected
+  // Q1: Exactly welcome.intro is OVERRIDE-CONNECTED. Runtime relevance is a
+  // separate fact and must not be read as "47 legacy" or "47 unused".
   const connectedKeys = COPY_REGISTRY.filter((e) =>
     isKeyConnectedToRuntime(e.key),
   ).map((e) => e.key);
@@ -3368,67 +3443,98 @@ async function main(): Promise<void> {
       getCopyRuntimeCoverage(e.key, e.classification),
     ]),
   );
+  const relevanceCounts = COPY_REGISTRY.reduce(
+    (acc, e) => {
+      acc[getCopyRuntimeRelevance(e.key)] =
+        (acc[getCopyRuntimeRelevance(e.key)] ?? 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
   check(
-    "Q1. مفتاح welcome.intro فقط متصل بالمحادثة الحية وجميع المفاتيح الـ47 الأخرى غير متصلة",
+    "Q1. تجاوز المختبر موصول لمفتاح welcome.intro فقط؛ المفاتيح الـ47 الأخرى غير موصولة تجاوزياً مع تصنيف صلة تشغيلية منفصل",
     connectedKeys.length === 1 &&
       connectedKeys[0] === "welcome.intro" &&
       coverageMap.get("welcome.intro")?.isConnected === true &&
-      coverageMap.get("welcome.intro")?.status === "CONNECTED" &&
+      coverageMap.get("welcome.intro")?.overrideConnection === "CONNECTED" &&
       COPY_REGISTRY.every((e) =>
         e.key === "welcome.intro"
-          ? coverageMap.get(e.key)?.isConnected === true
-          : coverageMap.get(e.key)?.isConnected === false &&
-            coverageMap.get(e.key)?.status === "NOT_CONNECTED",
-      ),
+          ? coverageMap.get(e.key)?.overrideConnection === "CONNECTED"
+          : coverageMap.get(e.key)?.overrideConnection !== "CONNECTED" &&
+            coverageMap.get(e.key)?.isConnected === false,
+      ) &&
+      relevanceCounts.CURRENT_OPERATIONAL_TEMPLATE === 37 &&
+      relevanceCounts.AUTHORITATIVE_DATA_PRESENTATION === 1 &&
+      relevanceCounts.LEGACY_ONLY_PATH === 9 &&
+      relevanceCounts.UNUSED_CODE === 1,
   );
 
-  // Q2: Arabic scope explanation for welcome.intro
+  // Q2: Precise /start scope for welcome.intro (not "all new conversations")
   const welcomeCoverage = coverageMap.get("welcome.intro")!;
   const welcomeScopeOk =
-    welcomeCoverage.scopeSummary.includes("/start") &&
-    welcomeCoverage.scopeSummary.includes("مقدمة الترحيب") &&
-    welcomeCoverage.scopeSummary.includes("لا يغيّر أزرار الخيارات") &&
-    welcomeCoverage.scopeSummary.includes("استئناف الحجز النشط") &&
-    welcomeCoverage.operationalNote.includes(
-      "الرجوع التلقائي للنص الافتراضي",
+    welcomeCoverage.relevance === "CURRENT_OPERATIONAL_TEMPLATE" &&
+    welcomeCoverage.overrideConnection === "CONNECTED" &&
+    welcomeCoverage.overrideConnectionSummary.includes("/start") &&
+    welcomeCoverage.overrideConnectionSummary.includes("جديدة أو خاملة") &&
+    welcomeCoverage.overrideConnectionSummary.includes(
+      "لا يغيّر أزرار الخيارات",
     ) &&
-    welcomeCoverage.operationalNote.includes(
-      "لا يضمن ولا يثبت تسليم مزود الرسائل",
+    welcomeCoverage.overrideConnectionSummary.includes("استئناف حجز نشط") &&
+    welcomeCoverage.overrideConnectionSummary.includes(
+      "الرجوع للنص الافتراضي",
+    ) &&
+    welcomeCoverage.overrideConnectionSummary.includes(
+      "لا يثبت تسليم مزود الرسائل",
     );
   check(
-    "Q2. نطاق welcome.intro موضح بالعربية: مسار /start خامل/جديد فقط، لا يغير الأزرار ولا استئناف الحجز، وله بديل آمن دون ادعاء تسليم المزود",
+    "Q2. نطاق welcome.intro دقيق: /start لمحادثة جديدة/خاملة فقط، لا يغير الأزرار ولا استئناف حجز نشط، ولا يدعي إثبات تسليم المزود",
     welcomeScopeOk,
   );
 
-  // Q3: Arabic explanation for unwired keys
-  const unwiredSample = coverageMap.get("greeting.invite")!;
-  const unwiredScopeOk =
-    unwiredSample.scopeSummary.includes("غير متصل بمحرك المحادثة الحية بعد") &&
-    unwiredSample.scopeSummary.includes("لا يغيّر الردود الحية للعملاء") &&
-    unwiredSample.operationalNote.includes(
-      "التعديل والمعاينة وسجل التعديلات والاسترجاع",
-    );
+  // Q3: Separate relevance from override connection, with no future-wiring
+  // promise. `booking.offer` is CURRENT but its override is NOT connected;
+  // `greeting.invite` is LEGACY; the Telegram start constant is UNUSED.
+  const operationalUnwired = coverageMap.get("booking.offer")!;
+  const legacySample = coverageMap.get("greeting.invite")!;
+  const unusedSample = coverageMap.get("channel.telegram.start_welcome")!;
   check(
-    "Q3. المفاتيح غير المربوطة توضح صراحة أن الحفظ/النشر لا يغير الردود الحية مع الحفاظ على التحرير والمعاينة والسجل",
-    unwiredScopeOk,
+    "Q3. الصلة التشغيلية والربط التجاوزي منفصلان: نص حالي غير موصول التجاوز، ومسار قديم، ورمز غير مستخدم، دون وعد بربط لاحق",
+    operationalUnwired.relevance === "CURRENT_OPERATIONAL_TEMPLATE" &&
+      operationalUnwired.overrideConnection === "NOT_CONNECTED" &&
+      operationalUnwired.relevanceSummary.includes("يُنتج فعلياً") &&
+      operationalUnwired.relevanceSummary.includes(
+        "لا يعني أن تجاوز المختبر يُقرأ",
+      ) &&
+      operationalUnwired.overrideConnectionSummary.includes(
+        "لا يقرأ المحرك تجاوزات المختبر",
+      ) &&
+      operationalUnwired.overrideConnectionSummary.includes(
+        "لا يعني وجود خطة لربط",
+      ) &&
+      legacySample.relevance === "LEGACY_ONLY_PATH" &&
+      legacySample.overrideConnection === "NOT_CONNECTED" &&
+      legacySample.relevanceSummary.includes("احتياطي/قديم") &&
+      unusedSample.relevance === "UNUSED_CODE" &&
+      unusedSample.overrideConnection === "NOT_CONNECTED" &&
+      unusedSample.relevanceSummary.includes("لا يوجد مستدعٍ") &&
+      unusedSample.runtimeNote?.includes("welcome.intro") === true,
   );
 
-  // Q4: Protection classification remains independent of runtime coverage
+  // Q4: Protected copy stays read-only and is independent of override wiring.
   const protectedEntries = COPY_REGISTRY.filter(
     (e) => e.classification === "PROTECTED_COPY",
   );
   check(
-    "Q4. التصنيف المحمي مستقل تماماً عن حالة التوصيل بالمحادثة، وإرشاداته تؤكد أنه للقراءة فقط دون وعود تعديل أو استرجاع",
+    "Q4. التصنيف المحمي مستقل: نص تشغيلي حالي، تجاوزه غير متاح، وللقراءة فقط دون وعود تعديل أو استرجاع",
     protectedEntries.length === 4 &&
       protectedEntries.every((e) => {
         const cov = coverageMap.get(e.key);
         return (
           canEditCopy(e) === false &&
-          cov?.isConnected === false &&
-          cov?.scopeSummary.includes("محمي ومخصص للقراءة فقط") &&
-          cov?.operationalNote.includes(
-            "ولا تتوفر له عمليات التعديل أو النشر أو إعادة التعيين أو الاسترجاع",
-          ) &&
+          cov?.relevance === "CURRENT_OPERATIONAL_TEMPLATE" &&
+          cov?.overrideConnection === "NOT_APPLICABLE" &&
+          cov?.overrideConnectionSummary.includes("محمي") &&
+          cov?.operationalNote.includes("للقراءة والمعاينة فقط") &&
           !cov?.operationalNote.includes("تظل إمكانية التعديل")
         );
       }),
@@ -3470,13 +3576,14 @@ async function main(): Promise<void> {
     "Q6. رسائل تأكيد العمليات صريحة: تفرق بين النشر وإعادة التعيين والاسترجاع وفشل القراءة الراجعة وتصف دقة الحالة المخزنة",
     welcomePublishFeedback.includes("مسار /start") &&
       welcomePublishFeedback.includes("لا يعني ذلك التحقق من تسليم المزود") &&
-      unwiredPublishFeedback.includes("غير متصل بالمحادثة الحية بعد") &&
-      unwiredPublishFeedback.includes("لن تتغير ردود العملاء الحية حالياً") &&
+      unwiredPublishFeedback.includes("تجاوز المختبر غير موصول") &&
+      unwiredPublishFeedback.includes("لن تتغير الردود الحية") &&
       resetFeedback.includes("حذف التجاوز") &&
       resetFeedback.includes("يعود النص المعتمد في المخزن إلى الافتراضي") &&
       restoreFeedback.includes("استرجاع النسخة المحددة") &&
       failedReadbackFeedback.includes("تم حفظ التعديل بنجاح") &&
-      failedReadbackFeedback.includes("دون إثبات قراءة راجعة"),
+      failedReadbackFeedback.includes("دون إثبات قراءة راجعة") &&
+      resetFeedback.includes("تجاوز المختبر غير موصول"),
   );
 
   // ── Report ───────────────────────────────────────────────────────────────

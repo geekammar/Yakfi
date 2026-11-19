@@ -1,5 +1,34 @@
 # FlowPilot — Build State
 
+## Conversation Lab alignment with current semantic architecture (Draft PR, v0.79.20) — 19 November 2026
+
+- Baseline verified: `main` `c19365e731a985af77988749078c346fe89d2f06`
+  (`0.79.19`, PR #93 merged). The unrelated booking/delivery/transcript branch
+  was left untouched.
+- **Scope:** `/platform/conversation-lab` only — no runtime semantic, booking,
+  disclosure, safety, tenant, delivery, provider, webhook, secret or database
+  change; no key removal or migration.
+- **Inventory:** 37 current operational templates + 1 authoritative-data
+  presentation + 9 legacy/fallback-only + 1 unused code (`channel.telegram.start_welcome` has no caller). Only `welcome.intro` is override-connected.
+- **UI/editor:** default operational scope with explicit «كل السجل» inspection;
+  separate relevance/override badges; canonical validator feedback; publish
+  disabled while invalid; dirty comparison against the loaded effective text;
+  unsaved-edit indicator; discard confirmation; drafts preserved on failed
+  publish/readback. Follow-up repair: the editor is read-only from the
+  mutation request through the readback (with a single in-flight guard), a
+  dirty restore/reset requires one explicit confirmation that names both
+  stored-override replacement and local-draft loss, and close/Escape/overlay/
+  swipe are blocked while a write is pending. Existing overrides/history and
+  protected read-only rules are preserved.
+- **Separate finding (not changed):** a policy-resolution failure returns
+  `deterministicConversationAi`, which can lexically interpret structured
+  free-form input and emit legacy templates. A fail-closed replacement and
+  regression cases are proposed in the report; runtime behavior is not changed
+  in this Lab PR.
+- **Verification:** required CI on the PR HEAD is the authority. No paid AI
+  call, Telegram/customer send, production DB access, migration, merge or
+  deployment was performed.
+
 ## Booking temporal freshness, truthful delivery visibility & staff transcript identity (Draft PR, v0.79.19) — 19 November 2026
 
 - Baseline verified: `main` `9e887dfccbaa2f990861abc75518f78d1c9fb223`
