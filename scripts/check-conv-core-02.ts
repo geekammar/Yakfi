@@ -2,7 +2,7 @@
  * FlowPilot — CONV-CORE-02 Verification Suite
  * Context-Aware JEV-First Semantic Gateway & Single Decision Ownership
  *
- * Verifies all 19 Required Scenarios (A through S) through real engine,
+ * Verifies the required Scenarios (A through T) through real engine,
  * gateway, semantic strategy, decisions provider, and mock HTTP seams:
  *  A. Initial Arabic booking with context projection
  *  B. Date correction: date updates, service & evening preference survive, slot offer invalidated
@@ -23,6 +23,7 @@
  *  Q. Fresh request / durable reload: store reload affects provider request and planning
  *  R. Context bounds & disclosure: bounds enforced, secrets/nonces excluded, stale offers nullified
  *  S. State-revision regression: CAS conflict detected and handled through openTurnStateSession()
+ *  T. Inherited temporal freshness: expired dates/offers are not resumed into a new request
  *
  * Run: pnpm check:conv-core-02
  */
@@ -200,6 +201,7 @@ async function main(): Promise<void> {
     hydrateConversationState,
     mergeConversationState,
     projectConversationState,
+    pruneExpiredBookingTemporalFacts,
     withPresentedOffer,
   } = await import("../src/features/conversations/server/conversation-state");
   const { buildAiContext } =
@@ -714,6 +716,7 @@ async function main(): Promise<void> {
       createdAppointments,
       capturedRequests,
       sendTurn,
+      getMessages: () => messages,
       httpCalls,
       setHttpHandler: (fn: MockHttpHandler) => {
         currentHttpHandler = fn;
@@ -1540,6 +1543,345 @@ async function main(): Promise<void> {
         wireCtx?.time_preference === "morning",
       wireCtx,
     );
+  }
+
+  // =========================================================================
+  // SCENARIO T: Inherited temporal freshness (2026-11-19 live repair)
+  // A NEW earliest-availability request without a date must never inherit an
+  // EXPIRED durable date (false PAST_DATE rejection). Valid future continuation
+  // and explicit customer dates keep their existing authority.
+  // =========================================================================
+  {
+    const seedBookingState = async (
+      fixture: ReturnType<typeof createEngineFixture>,
+      date: string,
+    ) => {
+      const seed = emptyConversationState() as MutableConversationState;
+      seed.activeTask = { kind: "BOOKING", stage: "DATE_SUPPLIED" };
+      seed.bookingStage = "DATE_SUPPLIED";
+      seed.serviceId = SERVICE_1;
+      seed.selectedService = "كشف أسنان";
+      seed.selectedDate = date;
+      seed.knownFacts = {
+        service: "كشف أسنان",
+        date,
+      };
+      await fixture.stateStore.save(
+        B_ID,
+        fixture.conversation.id,
+        null,
+        dehydrateConversationState(seed),
+      );
+    };
+
+    const availabilityReply = {
+      intent: "AVAILABILITY" as const,
+      action: "booking_handoff" as const,
+      summary: "طلب أقرب يوم متاح",
+      content: "هساعدك نلاقي أقرب يوم متاح.",
+      handoffReason: null,
+      extraction: {
+        service: "كشف أسنان",
+        provider: null,
+        date: null,
+        timePreference: null,
+      },
+    };
+
+    // T1: stale durable date + fresh earliest-availability request
+    {
+      const fixture = createEngineFixture({
+        hasCredentials: false,
+        customGenerativeReply: () => availabilityReply,
+      });
+      await seedBookingState(fixture, "2026-09-13");
+
+      const res = await fixture.sendTurn(
+        "عايز أحجز كشف أسنان، إيه أقرب يوم فاضي عندكم؟",
+      );
+      const assistantTexts = fixture
+        .getMessages()
+        .filter((message) => message.senderType === "AI")
+        .map((message) => message.content);
+      const saved = await fixture.stateStore.load(
+        B_ID,
+        fixture.conversation.id,
+      );
+      const state = saved
+        ? hydrateConversationState(saved.state, {
+            businessId: B_ID,
+            conversationId: fixture.conversation.id,
+          })
+        : null;
+
+      check(
+        "Scenario T1: Fresh earliest-availability request ignores an expired inherited date (no false PAST_DATE)",
+        res.ok === true &&
+          !res.duplicate &&
+          assistantTexts.length === 1 &&
+          !assistantTexts[0]!.includes("التاريخ المحدد في الماضي") &&
+          state?.knownFacts?.date == null,
+        { assistantTexts, state: state?.knownFacts },
+      );
+    }
+
+    // T1b: a wholly past inherited range is not reused as the search window
+    {
+      const fixture = createEngineFixture({
+        hasCredentials: false,
+        customGenerativeReply: () => availabilityReply,
+      });
+      const seed = emptyConversationState() as MutableConversationState;
+      seed.activeTask = { kind: "BOOKING", stage: "DATE_SUPPLIED" };
+      seed.bookingStage = "DATE_SUPPLIED";
+      seed.serviceId = SERVICE_1;
+      seed.selectedService = "كشف أسنان";
+      seed.knownFacts = {
+        service: "كشف أسنان",
+        dateRange: { startDate: "2026-09-10", endDate: "2026-09-12" },
+      };
+      seed.dateRange = { startDate: "2026-09-10", endDate: "2026-09-12" };
+      await fixture.stateStore.save(
+        B_ID,
+        fixture.conversation.id,
+        null,
+        dehydrateConversationState(seed),
+      );
+
+      const res = await fixture.sendTurn(
+        "عايز أحجز كشف أسنان، إيه أقرب يوم فاضي عندكم؟",
+      );
+      const assistantTexts = fixture
+        .getMessages()
+        .filter((message) => message.senderType === "AI")
+        .map((message) => message.content);
+      const saved = await fixture.stateStore.load(
+        B_ID,
+        fixture.conversation.id,
+      );
+      const state = saved
+        ? hydrateConversationState(saved.state, {
+            businessId: B_ID,
+            conversationId: fixture.conversation.id,
+          })
+        : null;
+
+      check(
+        "Scenario T1b: A wholly past inherited range is dropped for a fresh request",
+        res.ok === true &&
+          !res.duplicate &&
+          !assistantTexts.some((text) =>
+            text.includes("التاريخ المحدد في الماضي"),
+          ) &&
+          state?.knownFacts?.dateRange == null &&
+          state?.dateRange == null,
+        { assistantTexts, state: state?.knownFacts },
+      );
+    }
+
+    // T1c: the pure freshness helper invalidates an expired dated offer
+    {
+      const staleOffer = buildSlotOffer(
+        { businessId: B_ID, conversationId: "conv-freshness-pure" },
+        "offer-stale-freshness",
+        {
+          serviceId: SERVICE_1,
+          serviceName: "كشف أسنان",
+          serviceSource: "CUSTOMER",
+          providerId: null,
+          date: "2026-09-13",
+          followUpRequestId: null,
+          shownCount: 1,
+          options: [
+            {
+              providerId: PROVIDER_1,
+              displayName: "د. سارة",
+              startAt: "2026-09-13T10:00",
+              endAt: "2026-09-13T10:30",
+            },
+          ],
+        },
+        new Date("2026-09-13T09:00:00Z"),
+      )!;
+      const seeded = withPresentedOffer(
+        emptyConversationState(),
+        staleOffer,
+      ) as MutableConversationState;
+      seeded.knownFacts = { ...seeded.knownFacts, date: "2026-09-13" };
+
+      const pruned = pruneExpiredBookingTemporalFacts(seeded, "2026-09-14");
+
+      check(
+        "Scenario T1c: Expired inherited date and offer are invalidated before reuse",
+        pruned.knownFacts.date == null &&
+          pruned.selectedDate == null &&
+          pruned.offer?.status === "INVALIDATED" &&
+          pruned.pendingOffer == null,
+        { knownFacts: pruned.knownFacts, offer: pruned.offer },
+      );
+    }
+
+    // T2: valid future continuation keeps the inherited date
+    {
+      const fixture = createEngineFixture({
+        hasCredentials: false,
+        customGenerativeReply: () => availabilityReply,
+      });
+      await seedBookingState(fixture, "2026-09-15");
+
+      const res = await fixture.sendTurn(
+        "عايز أحجز كشف أسنان، إيه أقرب يوم فاضي عندكم؟",
+      );
+      const assistantTexts = fixture
+        .getMessages()
+        .filter((message) => message.senderType === "AI")
+        .map((message) => message.content);
+      const saved = await fixture.stateStore.load(
+        B_ID,
+        fixture.conversation.id,
+      );
+      const state = saved
+        ? hydrateConversationState(saved.state, {
+            businessId: B_ID,
+            conversationId: fixture.conversation.id,
+          })
+        : null;
+
+      check(
+        "Scenario T2: Valid future continuation preserves the inherited booking date",
+        res.ok === true &&
+          !res.duplicate &&
+          !assistantTexts.some((text) =>
+            text.includes("التاريخ المحدد في الماضي"),
+          ) &&
+          state?.knownFacts?.date === "2026-09-15",
+        { assistantTexts, state: state?.knownFacts },
+      );
+    }
+
+    // T3: an explicit past date on the current turn is still rejected
+    {
+      const fixture = createEngineFixture({
+        hasCredentials: false,
+        customGenerativeReply: () => ({
+          ...availabilityReply,
+          extraction: {
+            ...availabilityReply.extraction,
+            date: "2026-09-13",
+          },
+        }),
+      });
+
+      const res = await fixture.sendTurn("احجز لي كشف أسنان يوم 13 سبتمبر");
+      const assistantTexts = fixture
+        .getMessages()
+        .filter((message) => message.senderType === "AI")
+        .map((message) => message.content);
+      const saved = await fixture.stateStore.load(
+        B_ID,
+        fixture.conversation.id,
+      );
+      const state = saved
+        ? hydrateConversationState(saved.state, {
+            businessId: B_ID,
+            conversationId: fixture.conversation.id,
+          })
+        : null;
+
+      check(
+        "Scenario T3: An explicit past date is still rejected truthfully",
+        res.ok === true &&
+          !res.duplicate &&
+          assistantTexts.some((text) =>
+            text.includes("التاريخ المحدد في الماضي"),
+          ) &&
+          state?.knownFacts?.date == null &&
+          fixture.createdAppointments.length === 0,
+        { assistantTexts, state: state?.knownFacts },
+      );
+    }
+
+    // T4: an explicit future date remains authoritative
+    {
+      const fixture = createEngineFixture({
+        hasCredentials: false,
+        customGenerativeReply: () => ({
+          ...availabilityReply,
+          extraction: {
+            ...availabilityReply.extraction,
+            date: "2026-09-16",
+          },
+        }),
+      });
+
+      const res = await fixture.sendTurn("احجز لي كشف أسنان يوم 16 سبتمبر");
+      const assistantTexts = fixture
+        .getMessages()
+        .filter((message) => message.senderType === "AI")
+        .map((message) => message.content);
+      const saved = await fixture.stateStore.load(
+        B_ID,
+        fixture.conversation.id,
+      );
+      const state = saved
+        ? hydrateConversationState(saved.state, {
+            businessId: B_ID,
+            conversationId: fixture.conversation.id,
+          })
+        : null;
+
+      check(
+        "Scenario T4: An explicit future date keeps its current-turn authority",
+        res.ok === true &&
+          !res.duplicate &&
+          !assistantTexts.some((text) =>
+            text.includes("التاريخ المحدد في الماضي"),
+          ) &&
+          state?.knownFacts?.date === "2026-09-16",
+        { assistantTexts, state: state?.knownFacts },
+      );
+    }
+
+    // T5: Cairo local-date boundary (UTC 2026-11-18 22:30 = Cairo 11-19 00:30)
+    {
+      const boundaryNow = new Date("2026-11-18T22:30:00Z");
+      const fixture = createEngineFixture({
+        hasCredentials: false,
+        customGenerativeReply: () => availabilityReply,
+      });
+      fixture.stateStore.clock = () => boundaryNow;
+      await seedBookingState(fixture, "2026-11-18");
+
+      const res = await fixture.sendTurn(
+        "عايز أحجز كشف أسنان، إيه أقرب يوم فاضي عندكم؟",
+        boundaryNow,
+      );
+      const assistantTexts = fixture
+        .getMessages()
+        .filter((message) => message.senderType === "AI")
+        .map((message) => message.content);
+      const saved = await fixture.stateStore.load(
+        B_ID,
+        fixture.conversation.id,
+      );
+      const state = saved
+        ? hydrateConversationState(saved.state, {
+            businessId: B_ID,
+            conversationId: fixture.conversation.id,
+          })
+        : null;
+
+      check(
+        "Scenario T5: Cairo date boundary treats the prior Cairo day as expired",
+        res.ok === true &&
+          !res.duplicate &&
+          !assistantTexts.some((text) =>
+            text.includes("التاريخ المحدد في الماضي"),
+          ) &&
+          state?.knownFacts?.date == null,
+        { assistantTexts, state: state?.knownFacts },
+      );
+    }
   }
 
   // =========================================================================

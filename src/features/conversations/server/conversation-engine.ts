@@ -167,6 +167,7 @@ import {
   hasResumableDraftTask,
   mergeConversationState,
   pendingOfferMirror,
+  pruneExpiredBookingTemporalFacts,
   withOfferStatus,
   withPresentedOffer,
 } from "@/features/conversations/server/conversation-state";
@@ -273,6 +274,7 @@ import {
 import { InboundDuplicateError } from "@/server/repositories/inbound-dedupe.repository";
 import {
   TransportError,
+  type TransportFailureStage,
   type TransportSendResult,
   type WhatsAppTransportErrorCode,
 } from "@/server/transport/whatsapp-transport";
@@ -545,6 +547,12 @@ export type InboundDelivery = {
   delivered: boolean;
   error?: string;
   errorCode?: InboundDeliveryFailureCode;
+  /** Bounded stage that distinguishes network, HTTP, payload and pre-send. */
+  failureStage?: TransportFailureStage;
+  /** Validated provider HTTP status when the failure was an HTTP response. */
+  httpStatus?: number;
+  /** Provider-directed retry delay when the provider supplied one. */
+  retryAfterSeconds?: number;
   providerMessageId?: string;
 };
 
@@ -1292,7 +1300,8 @@ const RESUME_ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 function resumeBookingExtraction(
   response: AiResponse,
   state: ConversationState,
-  reconciled?: ReconciledTurnFacts,
+  reconciled: ReconciledTurnFacts | undefined,
+  todayIso: string,
 ): AiResponse {
   const rec =
     reconciled ??
@@ -1343,11 +1352,24 @@ function resumeBookingExtraction(
     serviceChanged || hasTurnTemporalProposal
       ? null
       : (state.knownFacts.date ?? null);
+  // An inherited date is a CONTINUATION only while it is still bookable in the
+  // business-local calendar. A date that has since passed must never be
+  // silently injected into a NEW request (it would turn an unstated-date
+  // earliest-availability question into a false PAST_DATE rejection). An
+  // explicit current-turn date is still validated below and rejected
+  // truthfully when it is genuinely in the past.
+  const resumableStateDate =
+    stateDate != null &&
+    RESUME_ISO_DATE.test(stateDate) &&
+    isValidIsoCalendarDate(stateDate) &&
+    stateDate >= todayIso
+      ? stateDate
+      : null;
   const date = rec.isRemoved("date")
     ? null
     : (rec.setFacts.get("date")?.value ??
       e.date ??
-      (stateDate && RESUME_ISO_DATE.test(stateDate) ? stateDate : null));
+      resumableStateDate);
 
   let exactTime = e.exactTime ?? null;
   if (rec.isRemoved("exactTime")) {
@@ -1412,6 +1434,11 @@ function projectTransportDelivery(sent: TransportSendResult): InboundDelivery {
     delivered: sent.delivered,
     ...(sent.error ? { error: sent.error } : {}),
     ...(sent.errorCode ? { errorCode: sent.errorCode } : {}),
+    ...(sent.failureStage ? { failureStage: sent.failureStage } : {}),
+    ...(sent.httpStatus !== undefined ? { httpStatus: sent.httpStatus } : {}),
+    ...(sent.retryAfterSeconds !== undefined
+      ? { retryAfterSeconds: sent.retryAfterSeconds }
+      : {}),
     ...(sent.providerMessageId
       ? { providerMessageId: sent.providerMessageId }
       : {}),
@@ -1422,12 +1449,18 @@ function projectTransportException(
   provider: string,
   error: unknown,
 ): InboundDelivery {
+  if (!(error instanceof TransportError)) {
+    return { provider, delivered: false, errorCode: "UNKNOWN_ERROR" };
+  }
   return {
     provider,
     delivered: false,
-    ...(error instanceof TransportError
-      ? { errorCode: error.code }
-      : { errorCode: "UNKNOWN_ERROR" }),
+    errorCode: error.code,
+    ...(error.failureStage ? { failureStage: error.failureStage } : {}),
+    ...(error.httpStatus !== undefined ? { httpStatus: error.httpStatus } : {}),
+    ...(error.retryAfterSeconds !== undefined
+      ? { retryAfterSeconds: error.retryAfterSeconds }
+      : {}),
   };
 }
 
@@ -3861,6 +3894,21 @@ async function runInboundTurn(
       { businessId: business.id, conversationId: conversation.id },
       now,
     );
+
+    // Expired inherited booking facts must not reach the CURRENT AI context or
+    // the booking mapper. Prune against the business-local calendar BEFORE the
+    // context is built; an explicitly stated date on this turn still arrives
+    // through the current AI extraction and keeps its authoritative validation.
+    if (turnSession.state) {
+      const turnTodayIso = todayIsoInTimeZone(
+        now,
+        resolveValidTimeZone(business.timezone),
+      );
+      turnSession.state = pruneExpiredBookingTemporalFacts(
+        turnSession.state,
+        turnTodayIso,
+      );
+    }
 
     const interactionResolution = resolveInteractionDisplay({
       rawText: inbound.text,
@@ -6632,14 +6680,45 @@ async function runInboundTurn(
         validated.extraction,
         validated.factUpdates,
       );
+      const todayIso = todayIsoInTimeZone(now, business.timezone ?? "UTC");
+
+      // A NEW request that states no temporal fact must not inherit an expired
+      // date/range/offer from an older booking attempt. Explicit current-turn
+      // temporal proposals are deliberately exempt so their existing PAST_DATE
+      // validation remains authoritative.
+      const hasCurrentTemporalProposal =
+        turnReconciled.isTouched("date") ||
+        turnReconciled.isTouched("dateRange") ||
+        Boolean(validated.extraction.date) ||
+        Boolean(validated.extraction.temporalRequest);
+      if (!hasCurrentTemporalProposal) {
+        if (resolvedState) {
+          resolvedState = pruneExpiredBookingTemporalFacts(
+            resolvedState,
+            todayIso,
+          );
+          if (turnSession.enabled) {
+            turnSession.state = resolvedState;
+          }
+        } else if (turnSession.enabled && turnSession.state) {
+          turnSession.state = pruneExpiredBookingTemporalFacts(
+            turnSession.state,
+            todayIso,
+          );
+        }
+      }
+
       let bookingAiResponse = resolvedState
-        ? resumeBookingExtraction(validated, resolvedState, turnReconciled)
+        ? resumeBookingExtraction(
+            validated,
+            resolvedState,
+            turnReconciled,
+            todayIso,
+          )
         : {
             ...validated,
             extraction: turnReconciled.normalizedExtraction,
           };
-
-      const todayIso = todayIsoInTimeZone(now, business.timezone ?? "UTC");
 
       if (isStructuredSemanticTurn) {
         // CORE-03B2B1: On structured semantic turns, validated AI proposals and authoritative

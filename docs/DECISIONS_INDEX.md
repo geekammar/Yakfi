@@ -126,6 +126,7 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
 | 109 | Authoritative service-price source alignment: expose authorized service ids, require exact id for `service.price`, preserve stored price shape; clear stale attention after Return to assistant | pricing answers/service.price prompt or gate/attention display | [#109](DECISIONS.md) |
 | 110 | Render single-service Node migration prep & recoverable secrets: `render.yaml`, `next.config.ts` PWA headers, `RENDER_GIT_COMMIT`, zero-DB `/api/health/live` vs HTTP 503 `/api/health`, exact-SHA release gate, values-free inventory + owner-encrypted X25519/GCM recovery & cutover runbook | Render hosting/health/release gate/secret recovery/cutover | [#110](DECISIONS.md) |
 | 111 | Direct Render secret transfer: owner-approved manual-only `direct-transfer` mode for `DATABASE_URL` + `CREDENTIAL_MASTER_KEY` from GitHub Actions secrets to confirmed `yakfi-web`/`ohio`; forced dry-run before per-key apply; optional encrypted recovery retained | Render secret transfer/direct transfer | [#111](DECISIONS.md) |
+| 112 | Booking temporal freshness (never resume expired dates/offers into a new request), bounded outbound delivery diagnostics + truthful failed-delivery display, and staff reply identity = persisted `Message.id` (provider id separate) | inherited booking dates/PAST_DATE, delivery failure visibility/diagnostics, staff reply duplicate/identity reconciliation | [#112](DECISIONS.md) |
 
 ## Historical decisions (never load unless doing forensics)
 
@@ -150,3 +151,6 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
   and does not change a product decision. Decision #111 adds the owner-approved
   direct Render secret transfer path (draft PR, not applied); it does not
   require keygen, an encrypted bundle, or `owner_restoration_proof`.
+- Decision #112 is a draft repair (v0.79.19) for inherited booking temporal
+  freshness, bounded outbound delivery diagnostics/visibility, and staff reply
+  transcript identity. It is not merged, deployed or live-retested.

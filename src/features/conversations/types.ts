@@ -32,6 +32,9 @@ export type InboxConversation = {
   hasAttention: boolean;
 };
 
+/** Persisted outbound delivery outcome for an assistant message. */
+export type MessageDeliveryStatus = "SUCCESS" | "FAILURE";
+
 /**
  * Authorized read-only snapshot for an OPEN conversation.
  *
@@ -104,6 +107,12 @@ export type ConversationDetailData = {
     content: string;
     displayText?: string | null;
     metadata?: unknown;
+    /**
+     * Persisted OUTBOUND_MESSAGE outcome for this assistant message. Absent
+     * when no delivery record exists (legacy/no attempt); `FAILURE` means the
+     * send was not confirmed delivered and must never be presented as such.
+     */
+    deliveryStatus?: MessageDeliveryStatus;
     createdAt: string;
   }>;
   appointments: Array<{

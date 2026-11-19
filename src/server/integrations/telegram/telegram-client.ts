@@ -45,7 +45,21 @@ export type TelegramErrorBody = {
   ok?: false;
   error_code?: number;
   description?: string;
+  parameters?: {
+    retry_after?: number;
+  };
 };
+
+function retryAfterSeconds(body: unknown): number | undefined {
+  if (!body || typeof body !== "object" || !("parameters" in body)) {
+    return undefined;
+  }
+  const parameters = (body as { parameters?: unknown }).parameters;
+  if (!parameters || typeof parameters !== "object") return undefined;
+  if (!("retry_after" in parameters)) return undefined;
+  const value = (parameters as { retry_after?: unknown }).retry_after;
+  return typeof value === "number" ? value : undefined;
+}
 
 /**
  * Map a Telegram HTTP failure onto the provider-neutral taxonomy
@@ -103,6 +117,7 @@ export async function callTelegramApi<T>(
       error: new TransportError(
         "TRANSIENT_TRANSPORT_FAILURE",
         "تعذر الاتصال بخدمة تيليجرام",
+        { failureStage: "NETWORK" },
       ),
     };
   }
@@ -120,9 +135,16 @@ export async function callTelegramApi<T>(
         ? (body as TelegramErrorBody)
         : null;
     const code = mapTelegramError(response.status, errorBody);
+    const retryAfter = retryAfterSeconds(body);
     return {
       ok: false,
-      error: new TransportError(code, telegramFailureMessage(code)),
+      error: new TransportError(code, telegramFailureMessage(code), {
+        failureStage: "PROVIDER_HTTP",
+        httpStatus: response.status,
+        ...(retryAfter !== undefined
+          ? { retryAfterSeconds: retryAfter }
+          : {}),
+      }),
     };
   }
 
@@ -133,6 +155,7 @@ export async function callTelegramApi<T>(
       error: new TransportError(
         "MALFORMED_PROVIDER_PAYLOAD",
         "استجابة تيليجرام غير صالحة",
+        { failureStage: "PROVIDER_PAYLOAD", httpStatus: response.status },
       ),
     };
   }
@@ -165,6 +188,7 @@ export async function resolveTelegramBotToken(
       error: new TransportError(
         "UNAUTHORIZED_CREDENTIALS",
         "مرجع بيانات اعتماد تيليجرام مفقود",
+        { failureStage: "CREDENTIALS" },
       ),
     };
   }
@@ -174,7 +198,9 @@ export async function resolveTelegramBotToken(
   if (!resolved.ok) {
     return {
       ok: false,
-      error: new TransportError("UNAUTHORIZED_CREDENTIALS", resolved.message),
+      error: new TransportError("UNAUTHORIZED_CREDENTIALS", resolved.message, {
+        failureStage: "CREDENTIALS",
+      }),
     };
   }
   return { ok: true, token: resolved.value };
@@ -258,6 +284,7 @@ export async function telegramSendMessage(
       error: new TransportError(
         "MALFORMED_PROVIDER_PAYLOAD",
         "استجابة تيليجرام غير صالحة",
+        { failureStage: "PROVIDER_PAYLOAD" },
       ),
     };
   }

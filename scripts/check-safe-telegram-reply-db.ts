@@ -459,6 +459,22 @@ async function main(): Promise<void> {
         typeof sub1?.providerMessageId === "string" &&
         sub1.providerMessageId.length > 0,
     );
+    check(
+      "1.11 Accepted result carries the persisted Message.id, never the provider id",
+      Boolean(
+        reply1Result.ok &&
+        reply1Result.outcome === "accepted" &&
+        reply1Result.messageId &&
+        reply1Result.messageId === staffMessage?.id &&
+        reply1Result.providerMessageId === sub1?.providerMessageId &&
+        reply1Result.messageId !== reply1Result.providerMessageId,
+      ),
+      {
+        result: reply1Result,
+        staffMessageId: staffMessage?.id,
+        submissionProviderMessageId: sub1?.providerMessageId,
+      },
+    );
 
     // ── Scenario 2: Ambiguous or Missing Route ──
     console.log("\n--- Scenario 2: Ambiguous or Missing Route ---");
@@ -1172,11 +1188,46 @@ async function main(): Promise<void> {
     });
 
     check(
-      "12.3 Accepted claim evaluated as accepted with messageId",
+      "12.3 Legacy accepted claim without a persisted message id never exposes the provider id as message identity",
       acceptedLookup.found &&
         acceptedLookup.status === "accepted" &&
-        acceptedLookup.messageId === "tg-msg-accepted-12345",
+        acceptedLookup.messageId === undefined &&
+        acceptedLookup.providerMessageId === "tg-msg-accepted-12345",
       acceptedLookup,
+    );
+
+    const acceptedIdentityKey = "accepted-identity-attempt-" + randomUUID();
+    const acceptedStaffMessageId = randomUUID();
+    await db.staffReplySubmission.create({
+      data: {
+        businessId: TEST_BUSINESS_ID,
+        conversationId: conv1Id,
+        submissionKey: acceptedIdentityKey,
+        payloadHash: createHash("sha256").update("accepted text").digest("hex"),
+        content: "accepted text",
+        status: "ACCEPTED",
+        provider: "telegram",
+        providerMessageId: "tg-msg-accepted-identity-67890",
+        staffMessageId: acceptedStaffMessageId,
+        completedAt: fixedNow,
+      },
+    });
+
+    const acceptedIdentityLookup = await lookupStaffReplyStatus({
+      businessId: TEST_BUSINESS_ID,
+      conversationId: conv1Id,
+      clientSubmissionId: acceptedIdentityKey,
+      deps: { now: () => fixedNow },
+    });
+
+    check(
+      "12.3b Accepted claim returns the persisted Message.id as identity and keeps the provider id separate",
+      acceptedIdentityLookup.found &&
+        acceptedIdentityLookup.status === "accepted" &&
+        acceptedIdentityLookup.messageId === acceptedStaffMessageId &&
+        acceptedIdentityLookup.providerMessageId ===
+          "tg-msg-accepted-identity-67890",
+      acceptedIdentityLookup,
     );
 
     // 4. Tenant isolation: foreign business cannot find accepted claim

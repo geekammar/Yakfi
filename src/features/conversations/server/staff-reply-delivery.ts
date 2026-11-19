@@ -77,7 +77,15 @@ export type SubmitStaffReplyResult =
   | {
       ok: true;
       outcome: "accepted";
-      messageId: string;
+      /**
+       * The AUTHORITATIVE persisted `Message.id` used by the operator UI to
+       * reconcile its optimistic row. Legacy accepted claims may predate the
+       * stored message id, in which case this is omitted and callers wait for
+       * the next server snapshot instead of inventing an identity.
+       */
+      messageId?: string;
+      /** Telegram's own message id — evidence only, never a Yakfi row id. */
+      providerMessageId?: string;
       assignedUser?: {
         id: string;
         name: string;
@@ -211,7 +219,10 @@ export type SubmissionClaimResult =
       outcome: "in-progress" | "accepted" | "definite_rejection" | "unknown";
       code?: string;
       message: string;
+      /** Persisted `Message.id` for an accepted claim (authoritative UI id). */
       messageId?: string;
+      /** Telegram message id (evidence only). */
+      providerMessageId?: string;
     };
 
 /**
@@ -315,7 +326,12 @@ export async function claimStaffReplySubmission(
         return {
           claimed: false,
           outcome: "accepted",
-          messageId: existing.providerMessageId ?? "",
+          ...(existing.staffMessageId
+            ? { messageId: existing.staffMessageId }
+            : {}),
+          ...(existing.providerMessageId
+            ? { providerMessageId: existing.providerMessageId }
+            : {}),
           message: "تم إرسال الرد بنجاح",
         };
       }
@@ -357,7 +373,10 @@ export type StaffReplyLookupResult =
       status: "in-progress" | "accepted" | "rejected" | "unknown";
       code?: string;
       message: string;
+      /** Persisted `Message.id` (authoritative UI identity) when accepted. */
       messageId?: string;
+      /** Telegram message id (evidence only, never a Yakfi row identity). */
+      providerMessageId?: string;
     }
   | {
       found: false;
@@ -413,8 +432,12 @@ export async function lookupStaffReplyStatus(
     return {
       found: true,
       status: "accepted",
-      messageId:
-        existing.providerMessageId ?? existing.staffMessageId ?? undefined,
+      ...(existing.staffMessageId
+        ? { messageId: existing.staffMessageId }
+        : {}),
+      ...(existing.providerMessageId
+        ? { providerMessageId: existing.providerMessageId }
+        : {}),
       message: "تم تأكيد قبول الرد من مزود الخدمة",
     };
   }
@@ -534,7 +557,10 @@ export async function submitStaffReply(
       return {
         ok: true,
         outcome: "accepted",
-        messageId: claimResult.messageId ?? "",
+        ...(claimResult.messageId ? { messageId: claimResult.messageId } : {}),
+        ...(claimResult.providerMessageId
+          ? { providerMessageId: claimResult.providerMessageId }
+          : {}),
         assignedUser: conv?.assignedTo ?? null,
       };
     }
@@ -727,6 +753,7 @@ export async function submitStaffReply(
 
       return {
         assignedUser: finalConversation?.assignedTo ?? null,
+        staffMessageId: message.id,
       };
     });
 
@@ -739,7 +766,13 @@ export async function submitStaffReply(
     return {
       ok: true,
       outcome: "accepted",
-      messageId: providerMessageId,
+      // The operator UI's message identity is the persisted row id, never the
+      // provider id: the provider id does not exist in the next server snapshot
+      // and would duplicate the optimistic row on the following poll/reopen.
+      ...(txResult?.staffMessageId
+        ? { messageId: txResult.staffMessageId }
+        : {}),
+      providerMessageId,
       assignedUser: txResult?.assignedUser ?? null,
     };
   } catch {

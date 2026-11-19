@@ -1,5 +1,48 @@
 # FlowPilot — Build State
 
+## Booking temporal freshness, truthful delivery visibility & staff transcript identity (Draft PR, v0.79.19) — 19 November 2026
+
+- Baseline verified: `main` `9e887dfccbaa2f990861abc75518f78d1c9fb223`
+  (`0.79.18`, PR #92 merged). PR #88 and Rabet were not touched.
+- **Finding A — expired inherited date:** the booking resume path merged a
+  durable `knownFacts.date` into a NEW request even when that date had already
+  passed, so an unstated-date availability question could reach the server
+  temporal validator as `PAST_DATE`. The inherited date/range/active offer is
+  now pruned against the business-timezone `todayIso` before resume; a date is
+  resumed only while it is a valid ISO date `>= todayIso`. Explicit current-turn
+  date/temporal proposals are exempt and still receive the existing truthful
+  PAST_DATE rejection. No prompt body was changed in place (DECISIONS #48).
+  The exact historical live source (model echo vs durable state) is not
+  retained in evidence; the confirmed engine-side reuse path and the stale
+  context projection are removed.
+- **Finding B — outbound delivery diagnostics:** `TRANSIENT_TRANSPORT_FAILURE`
+  still covers a fetch/network failure, 429 and 5xx. The Telegram boundary now
+  carries bounded `failureStage` (`NETWORK` / `PROVIDER_HTTP` /
+  `PROVIDER_PAYLOAD` / `CREDENTIALS` / `CONNECTION`), validated `httpStatus`
+  and bounded `retryAfterSeconds` through the transport result, engine delivery
+  projection and turn evidence. The exact historical 2026-11-19 cause is not
+  recoverable from the retained log (no status/stage was recorded).
+- **Finding B — operator visibility:** the conversation read model now joins the
+  existing append-only `OUTBOUND_MESSAGE` usage record for each assistant
+  message and exposes `deliveryStatus`; a `FAILURE` bubble renders
+  «لم يتم تأكيد وصول الرد» (never a delivered state). Message rows are not
+  mutated, no retry/outbox/worker was added and no historical message is replayed.
+- **Finding C — duplicate staff bubble:** `submitStaffReply` and the read-only
+  status lookup previously returned Telegram's `providerMessageId` as the
+  `messageId` used by the UI. The next server snapshot contains the persisted
+  `Message.id`, so the optimistic row and the same DB row could both render.
+  Accepted results now return the persisted `staffMessageId` as `messageId` and
+  expose `providerMessageId` separately; legacy accepted claims without a stored
+  message id return no `messageId` (the UI drops the local row and waits for the
+  snapshot). The status-recheck path now reconciles only by the authoritative
+  id. Text/timestamp/sender are never used for deduplication.
+- **Verification (in CI, not on the VPS):** focused additions cover stale
+  inherited date + fresh earliest-availability, valid future continuation,
+  explicit past/future dates, the Cairo local-date boundary, network vs
+  HTTP-429/5xx vs malformed-payload delivery diagnostics, failed-delivery UI
+  presentation, and staff reply identity/status/poll reconciliation. No
+  migration, live send, paid AI call, deploy or application DB write was made.
+
 ## Render-targeted Telegram cutover tooling (Draft PR, v0.79.18) — 18 November 2026
 
 - Baseline: PR91 merged at `e1851deec1406d690807440639761152d3d029e1` /
@@ -3476,7 +3519,10 @@ E2E` from a FRESH launch and record whether the whole
 
 ## Next Step
 
-Current next step: follow the reviewer recovery checkpoint above. The entries below are historical, not new execution instructions.
+Current next step (19 November 2026): review the single Draft PR for v0.79.19
+after required GitHub Actions CI passes; verify the targeted Muse retest plan
+on a reviewed deployment before any merge/deploy. The entries below are
+historical, not new execution instructions.
 
 **AWAITING CI & OPERATOR REVIEW — PR (feat/conv-core-03d2-semantic-safety) CORE-03D2**:
 Branch `feat/conv-core-03d2-semantic-safety` ready with Semantic Safety Ownership and False-Handoff Repair (v0.67.0).

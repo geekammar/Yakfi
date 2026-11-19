@@ -12,6 +12,7 @@ const {
   conversationRepository,
   getSession,
   operatorAttentionRepository,
+  usageRepository,
   userRepository,
 } = vi.hoisted(() => ({
   appointmentRepository: {
@@ -27,6 +28,9 @@ const {
     resolve: vi.fn(),
     resolveByConversation: vi.fn(),
   },
+  usageRepository: {
+    listOutboundDeliveryStatuses: vi.fn(),
+  },
   userRepository: {
     findById: vi.fn(),
     listByBusiness: vi.fn(),
@@ -37,6 +41,7 @@ vi.mock("@/server/repositories", () => ({
   appointmentRepository,
   conversationRepository,
   operatorAttentionRepository,
+  usageRepository,
   userRepository,
 }));
 
@@ -98,6 +103,7 @@ describe("getConversationRefresh", () => {
     userRepository.listByBusiness.mockResolvedValue([
       { id: USER_ID, name: "موظف", image: null, isActive: true },
     ]);
+    usageRepository.listOutboundDeliveryStatuses.mockResolvedValue(new Map());
   });
 
   it("is a tenant-scoped pure read that returns only refresh fields", async () => {
@@ -127,6 +133,44 @@ describe("getConversationRefresh", () => {
     });
     expect(result).not.toHaveProperty("customer");
     expect(result).not.toHaveProperty("currentUserId");
+  });
+
+  it("projects the persisted outbound delivery outcome for assistant messages", async () => {
+    const aiMessageId = "66666666-6666-4666-8666-666666666666";
+    const base = detailFor();
+    conversationRepository.findDetailByBusiness.mockResolvedValueOnce({
+      ...base,
+      messages: [
+        ...base.messages,
+        {
+          id: aiMessageId,
+          senderType: "AI" as const,
+          content: "رد المساعد",
+          displayText: null,
+          metadata: null,
+          createdAt: new Date("2026-11-01T10:01:00.000Z"),
+        },
+      ],
+    });
+    usageRepository.listOutboundDeliveryStatuses.mockResolvedValueOnce(
+      new Map([[aiMessageId, "FAILURE"]]),
+    );
+
+    const result = await getConversationRefresh(BUSINESS_ID, CONVERSATION_ID);
+
+    expect(
+      usageRepository.listOutboundDeliveryStatuses,
+    ).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+      messageIds: [aiMessageId],
+    });
+    expect(
+      result?.messages.find((message) => message.id === aiMessageId),
+    ).toMatchObject({ deliveryStatus: "FAILURE" });
+    expect(
+      result?.messages.find((message) => message.senderType === "CUSTOMER"),
+    ).not.toHaveProperty("deliveryStatus");
   });
 
   it("reads the current open attention without acknowledging it", async () => {
@@ -185,6 +229,7 @@ describe("refreshConversationDetail authorization", () => {
     userRepository.listByBusiness.mockResolvedValue([
       { id: USER_ID, name: "موظف", image: null, isActive: true },
     ]);
+    usageRepository.listOutboundDeliveryStatuses.mockResolvedValue(new Map());
   });
 
   it("rejects an unauthenticated caller before reading any conversation", async () => {
