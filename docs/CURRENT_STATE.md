@@ -58,8 +58,8 @@
   behavior. Partial apply/reconcile results report post-operation observed
   settings only when Telegram was actually inspected; otherwise they remain
   `UNKNOWN`, while desired settings stay separate.
-  CI run `44511875590` passed the code HEAD with **26/26** cutover checks and
-  27/27 Render migration checks. Manual `workflow_dispatch` from the candidate
+  CI run `44520995005` passed the code HEAD `8c4afbf` with **35/35** cutover
+  checks and 27/27 Render migration checks. Manual `workflow_dispatch` from the candidate
   branch is unavailable until the workflow exists on `main` (GitHub returns
   404); no live read-only preflight was executed from the candidate and no
   local secret workaround was used. No live webhook change was made.

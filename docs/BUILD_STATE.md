@@ -51,9 +51,10 @@
   exact post-apply sets, setWebhook followed by DB persistence failure,
   explicit guarded reconciliation, no-automatic-retry partial/ambiguous
   failures, and observed-versus-desired separation using controlled Telegram
-  responses. CI run `44511875590` passed with **26/26** cutover checks, 27/27
-  Render migration checks, `v0.79.18`, and Playwright 175 passed / 0 failed /
-  15 skipped.
+  responses. CI run `44520995005` passed the code HEAD `8c4afbf` with
+  **35/35** cutover checks, 27/27 Render migration checks, `v0.79.18`, and
+  Playwright 175 passed / 0 failed / 15 skipped after transient infrastructure
+  reruns.
 - RAM observation: the reviewer previously observed approximately **272–281 MiB
   of a 512 MiB limit over about 46 minutes**; this is a historical idle baseline,
   not proof of workload capacity.
