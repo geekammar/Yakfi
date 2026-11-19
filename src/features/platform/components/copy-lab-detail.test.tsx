@@ -593,7 +593,7 @@ describe("Conversation Lab Runtime Coverage & Honest Wording", () => {
       "مسار قديم/احتياطي",
     );
     expect(content, "override connection badge must render").toContain(
-      "تجاوز غير موصول",
+      "تجاوز المختبر غير موصول",
     );
     expect(
       content,
@@ -618,7 +618,7 @@ describe("Conversation Lab Runtime Coverage & Honest Wording", () => {
       "نص تشغيلي حالي",
     );
     expect(content, "renders protected override status").toContain(
-      "تجاوز غير متاح",
+      "تجاوز المختبر غير متاح",
     );
     expect(content, "renders protected notice").toContain(
       "نص محمي — غير قابل للتعديل",
@@ -678,7 +678,7 @@ describe("Conversation Lab Protected Guidance & Mutation Feedback Lifecycle (PR6
 
     const content = text();
     expect(content).toContain("مسار قديم/احتياطي");
-    expect(content).toContain("تجاوز غير موصول");
+    expect(content).toContain("تجاوز المختبر غير موصول");
     expect(content).toContain("لا يقرأ المحرك تجاوزات المختبر");
     expect(content).toContain(
       "تظل إمكانية التعديل والمعاينة وسجل التعديلات والاسترجاع متاحة",

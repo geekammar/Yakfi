@@ -513,7 +513,7 @@ export function getCopyRuntimeCoverage(
       overrideConnection: "NOT_APPLICABLE",
       overrideConnectionLabel: "تجاوز المختبر غير متاح (محمي)",
       overrideConnectionSummary:
-        "هذا النص محمي لحماية مسارات التحويل الآمن؛ لا تتوفر له عمليات التعديل أو النشر أو إعادة التعيين أو الاسترجاع في مخزن المنصة.",
+        "هذا النص محمي لحماية مسارات التحويل الآمن؛ ولا تتوفر له عمليات التعديل أو النشر أو إعادة التعيين أو الاسترجاع في مخزن المنصة.",
       runtimeNote,
       status: "NOT_CONNECTED",
       isConnected: false,
