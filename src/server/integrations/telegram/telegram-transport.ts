@@ -120,6 +120,7 @@ export function createTelegramMessageTransport(
           delivered: false,
           error: "لا يوجد اتصال مُحدَّد للإرسال",
           errorCode: "INVALID_CONNECTION",
+          failureStage: "CONNECTION",
         };
       }
       const resolution = await resolveTelegramConnectionForSend(deps, {
@@ -132,6 +133,10 @@ export function createTelegramMessageTransport(
           delivered: false,
           error: resolution.message,
           errorCode: resolution.code,
+          failureStage:
+            resolution.code === "UNAUTHORIZED_CREDENTIALS"
+              ? "CREDENTIALS"
+              : "CONNECTION",
         };
       }
 
@@ -145,6 +150,9 @@ export function createTelegramMessageTransport(
           delivered: false,
           error: tokenResolution.error.message,
           errorCode: tokenResolution.error.code,
+          ...(tokenResolution.error.failureStage
+            ? { failureStage: tokenResolution.error.failureStage }
+            : { failureStage: "CREDENTIALS" as const }),
         };
       }
 
@@ -169,6 +177,15 @@ export function createTelegramMessageTransport(
           delivered: false,
           error: result.error.message,
           errorCode: result.error.code,
+          ...(result.error.failureStage
+            ? { failureStage: result.error.failureStage }
+            : {}),
+          ...(result.error.httpStatus !== undefined
+            ? { httpStatus: result.error.httpStatus }
+            : {}),
+          ...(result.error.retryAfterSeconds !== undefined
+            ? { retryAfterSeconds: result.error.retryAfterSeconds }
+            : {}),
         };
       }
       return {

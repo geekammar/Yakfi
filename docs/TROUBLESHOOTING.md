@@ -316,6 +316,11 @@ connection strings.
   environment, so environment-scoped secrets cannot override its inputs.
 - **Merge and deployment:** approved PR #83 merge to `main`; normal Vercel
   Production build of the exact merge SHA.
+- **Render target (18 November 2026):** the legacy
+  `cutover-main-runtime-*` Vercel path below is **not** valid for Render. Use
+  the manual Render-targeted `render-telegram-cutover.yml`
+  `operation=preflight`/`apply` path documented in
+  `docs/VERCEL_DEPLOYMENT.md` §7.5.
 - **Runtime credential/bot identity and switch:** `test-db-migrate.yml`
   operations `cutover-main-runtime-dry-run` then
   `cutover-main-runtime-apply`, guarded to `main` plus the exact merge SHA.
@@ -434,3 +439,16 @@ The diagnostic repair in PR83 now carries a bounded `errorCode` (for example
 `UNKNOWN_ERROR` for thrown non-typed failures) through engine delivery,
 webhook logging and turn evidence. It does not resend Y83, retry blindly, or
 claim delivery without a fresh live retest.
+
+## Render Hosting & Cutover Troubleshooting — 17 November 2026
+
+<!-- prettier-ignore -->
+| Symptom | Cause & Safe Fix |
+| --- | --- |
+| Render build fails on missing `tsx`, `typescript`, or `@tailwindcss/postcss` | `NODE_ENV=production` caused `pnpm install` to skip `devDependencies`. Use the exact `render.yaml` build command with `pnpm install --frozen-lockfile --prod=false`. |
+| Render deploy times out scanning open ports | Next.js bound `localhost` or port `3000` instead of Render's `$PORT`. Start via `pnpm run start:render` (`next start --hostname 0.0.0.0 --port "${PORT:-10000}"`). |
+| Neon compute never suspends / high CU-hours with zero user traffic | Render's continuous (~5s) `healthCheckPath` was pointed at DB-backed `/api/health`. Keep `healthCheckPath: /api/health/live` (zero DB queries) and reserve `/api/health` (HTTP 200 vs 503) for explicit deploy/cutover verification. |
+| `/api/health` returns HTTP `503` with `status: "degraded"` | Either `database` is `"unreachable"`/`"not-configured"` (wake Neon or check `?sslmode=require`) or `missingEnvVars` is non-empty. Never treat HTTP 503 as deploy-ready. |
+| Better Auth returns `403` on sign-in or links point to stale host | `NEXT_PUBLIC_APP_URL` or `BETTER_AUTH_URL` did not match the exact `https://<service>.onrender.com` origin before `next build`. Set both to the exact HTTPS origin (no fake `VERCEL_ENV=preview`) and run a clean Render build. |
+| Telegram `getWebhookInfo` shows `pending_update_count > 0` before cutover | Updates accumulated while Vercel returned HTTP 402 `DEPLOYMENT_DISABLED`. **Do not** replay blindly and **do not** pass `drop_pending_updates=true`; stop and apply explicit owner backlog disposition (`docs/VERCEL_DEPLOYMENT.md` §7.5). |
+| Render 512 MB instance restarts during heavy traffic | Starter plan has 512 MB RAM (capacity unverified until measured live); an OOM or restart during `next/server` `after()` drops the in-flight post-200 callback without Telegram redelivery. Inspect Render Metrics and turn logs before resizing or redeploying. |

@@ -113,12 +113,15 @@ function projectAttempt(
  * Proven no-call is reserved for authoritative engine decisions:
  * - a deferred-to-staff turn never attempted AI;
  * - a deterministic/JEV routing with providerStatus NOT_CALLED proves no
- *   provider dispatch.
+ *   provider dispatch;
+ * - the explicit request-scoped PR #95 policy-unavailable marker proves the
+ *   policy failure happened before any provider/JEV dispatch.
  * An empty attempt list WITHOUT one of these proofs is UNAVAILABLE execution
  * evidence, never a fabricated no-call.
  */
 function hasProvenNoCall(record: TurnEvidence): boolean {
   if (record.finalOutcome === "DEFERRED_TO_STAFF") return true;
+  if (record.policyUnavailable) return true;
   if (record.providerStatus !== "NOT_CALLED") return false;
   return (
     record.routingDecision === "DETERMINISTIC_BYPASS" ||

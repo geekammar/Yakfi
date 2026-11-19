@@ -2,13 +2,16 @@
  * FlowPilot — REQUEST-SCOPED PROVIDER TELEMETRY check.
  *
  * Runs the PRODUCTION policy-backed assistant wrapper
- * (`createPolicyBackedConversationAi`) against fake provider HTTP responses.
+ * (`createPolicyBackedConversationAi`) through the PR #95 request-scoped
+ * `respondWithExecution` boundary against fake provider HTTP responses.
  * Two turns are interleaved so the first request is still in flight when the
- * second finishes; a third failure path follows.
+ * second finishes; a third failure path follows, then an explicit policy
+ * no-call case.
  *
- * Proves: response, provider identity, model, tokens, cost and failure state
- * all belong to the SAME request. No module-level "last telemetry" state can
- * leak one turn's accounting into another.
+ * Proves: response, provider identity, model, tokens, cost, failure state and
+ * the `policyUnavailable` marker all belong to the SAME request. No
+ * module-level "last telemetry" state can leak one turn's accounting into
+ * another.
  *
  * Run: pnpm check:request-scoped-usage
  */
@@ -16,9 +19,23 @@
 import type { AiRequest } from "../src/features/conversations/server/ai-contract";
 import { createPolicyBackedConversationAi } from "../src/features/conversations/server/conversation-engine";
 import type { EffectiveAiPolicy } from "../src/lib/validation/platform";
+import { POLICY_UNAVAILABLE_AI_PROVIDER } from "../src/server/integrations/ai/factory";
 import type { AiTelemetry } from "../src/server/integrations/ai/types";
 
 export {};
+
+function offlineEnv(name: string): string | undefined {
+  if (name === "FLOWPILOT_JEV_SEMANTIC_ENABLED") return "0";
+  if (
+    name === "OPENROUTER_API_KEY" ||
+    name === "AGENTROUTER_API_KEY" ||
+    name === "ATRIA_API_KEY" ||
+    name === "CODECRAFT_API_KEY"
+  ) {
+    return "test-key";
+  }
+  return process.env[name];
+}
 
 type Check = { label: string; pass: boolean };
 const checks: Check[] = [];
@@ -131,9 +148,9 @@ async function main(): Promise<void> {
     })) as never,
   });
 
-  const firstPromise = ai.respondTurn!(request("REQUEST_A"));
+  const firstPromise = ai.respondWithExecution!(request("REQUEST_A"));
   await firstStarted;
-  const secondPromise = ai.respondTurn!(request("REQUEST_B"));
+  const secondPromise = ai.respondWithExecution!(request("REQUEST_B"));
   const [first, second] = await Promise.all([firstPromise, secondPromise]);
 
   const firstTelemetry = first.telemetry as AiTelemetry | null;
@@ -166,7 +183,7 @@ async function main(): Promise<void> {
       firstTelemetry?.totalCostUsd !== secondTelemetry?.totalCostUsd,
   );
 
-  const failure = await ai.respondTurn!(request("REQUEST_THROW"));
+  const failure = await ai.respondWithExecution!(request("REQUEST_THROW"));
   const failureTelemetry = failure.telemetry as AiTelemetry | null;
   check("failure response is absent", failure.response === null);
   check(
@@ -188,6 +205,29 @@ async function main(): Promise<void> {
     "failure total is not a prior success total",
     failureTelemetry?.totalCostUsd !== 0.0011 &&
       failureTelemetry?.totalCostUsd !== 0.0022,
+  );
+
+  let policyFetchCalls = 0;
+  const policyFailureAi = createPolicyBackedConversationAi({
+    fetchImpl: (async () => {
+      policyFetchCalls += 1;
+      return providerResponse("UNEXPECTED", 0, 0, 0);
+    }) as typeof fetch,
+    getEnvVar: offlineEnv,
+    getAiPolicyImpl: (async () => ({
+      success: false,
+      error: { code: "PERSISTENCE_FAILED", message: "policy unavailable" },
+    })) as never,
+  });
+  const policyNoCall =
+    await policyFailureAi.respondWithExecution!(request("REQUEST_POLICY"));
+  check(
+    "policy failure is an explicit request-scoped no-call",
+    policyNoCall.response === null &&
+      policyNoCall.telemetry === null &&
+      policyNoCall.policyUnavailable === true &&
+      policyNoCall.providerName === POLICY_UNAVAILABLE_AI_PROVIDER &&
+      policyFetchCalls === 0,
   );
 
   const failed = checks.filter((entry) => !entry.pass);

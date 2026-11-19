@@ -40,7 +40,7 @@ const MESSAGE = "33333333-3333-4333-8333-333333333333";
 const TRACE = "abcdef0123456789abcdef0123456789";
 const META = {
   environment: "test",
-  appVersion: "0.79.15",
+  appVersion: "0.79.22",
   emittedAt: new Date("2026-11-16T10:00:00.000Z"),
 };
 const EXTRA_SECRET = "THIS-MUST-NEVER-BE-PERSISTED";
@@ -71,6 +71,7 @@ function evidence(
     finalOutcome?: string;
     assistantAction?: string;
     noObservability?: boolean;
+    policyUnavailable?: boolean;
   } = {},
 ): TurnEvidence {
   const result: InboundSuccess = {
@@ -95,6 +96,9 @@ function evidence(
             provider: "openrouter",
             model: "model-1",
             providerStatus: options.providerStatus ?? "SUCCESS",
+            ...(options.policyUnavailable
+              ? { policyUnavailable: true as const }
+              : {}),
             executionAttempts: attempts ?? undefined,
             totalCostUsd: costs.totalCostUsd,
             knownCostSubtotalUsd: costs.knownCostSubtotalUsd,
@@ -315,6 +319,32 @@ function main(): void {
   check("no-call: no completeness", noCall.costCompleteness === null);
   check("no-call: explicit TEST pool", noCall.trafficPool === "TEST");
   check("no-call: DTO valid", parseOk(noCall));
+
+  const policyNoCall = buildDurableTurnEvidence(
+    evidence(
+      null,
+      {},
+      {
+        providerStatus: "NOT_CALLED",
+        routingDecision: "NONE",
+        assistantAction: "AI_HANDOFF",
+        finalOutcome: "AI_HANDOFF",
+        policyUnavailable: true,
+      },
+    ),
+    "SERVING",
+  );
+  check(
+    "policy no-call: proven no-call",
+    policyNoCall.executionEvidence === "PROVEN_NO_CALL",
+  );
+  check("policy no-call: zero attempts", policyNoCall.attempts.length === 0);
+  check("policy no-call: no total", policyNoCall.totalCostUsd === null);
+  check(
+    "policy no-call: no completeness",
+    policyNoCall.costCompleteness === null,
+  );
+  check("policy no-call: DTO valid", parseOk(policyNoCall));
 
   const deferred = buildDurableTurnEvidence(
     evidence(

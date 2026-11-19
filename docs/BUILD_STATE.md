@@ -1,75 +1,354 @@
 # FlowPilot — Build State
 
-## PR88 focused repair — truthful reconciliation and request-scoped usage (draft, v0.79.15) — 16 November 2026
+## Durable usage/cost evidence refresh on PR #95 boundary (Draft PR #88, v0.79.22) — 19 November 2026
 
-- Request-scoped provider telemetry: the production policy-backed wrapper now
-  returns response/provider/telemetry from one request-local adapter through
-  `respondTurn`; module-level last-telemetry state was removed. Failure paths
-  cannot inherit a previous call's tokens/cost/model/provider.
-- Pool-scoped reporting: `reconcile` requires an explicit `trafficPool`.
-  Evidence/cost/attempt/identity metrics are scoped; `usage_records` window
-  counts are labelled NOT pool totals because that table has no pool column.
-  AI_TURN links are classified by authoritative IDs. TEST/SHADOW never inflate
-  SERVING.
-- Exact, bounded reconciliation: full requested tenant/conversation/≤31-day
-  window aggregates are exact (parameterized read-only SQL); link existence
-  does not depend on the other side's timestamp; the diagnostic list uses
-  limit+1/`hasMore`. Expected proven no-call is separated from unresolved
-  evidence-without-usage; historical identity-less usage is separated from new
-  missing evidence. A complete window total is emitted only when every scoped
-  turn is COMPLETE or proven no-call.
-- Execution-proof honesty: `executionEvidence` distinguishes RECORDED /
-  PROVEN_NO_CALL / UNAVAILABLE; missing HTTP counts are UNKNOWN, never
-  DISPATCHED; proven prevention carries zero external cost; confirmed HTTP
-  dispatches, logical attempts, unknown dispatch quantities and prevention are
-  separate counters. Migration
-  `20261116210000_durable_turn_evidence_execution_scope` is additive to the two
-  new evidence tables.
-- Required CI adds `check:request-scoped-usage` and expands the disposable-DB
-  suite with mixed-pool, exact-vs-page, window-edge, real missing link,
-  no-call, missing telemetry, unknown HTTP and prevention cases.
-- Separate operational observation: Production returned HTTP 402 /
-  `DEPLOYMENT_DISABLED` at 2026-11-16T21:12Z. PR #88 is not merged and is not
-  attributed as the cause; live acceptance is BLOCKED. No deployment/account/
-  billing change was attempted.
-- Explicit limits: no merge/deploy/Production migration; finished-turn crash
-  gaps, invoice reconciliation and a global enforceable spend cap remain open.
+- **Baseline verified:** PR #95 is merged as
+  `9187655ae9909326d8243eccffc11c2f160bcabb` (`0.79.21`); current `main` is
+  that merge. Read-only Render checks at `2026-11-19T23:31Z` still reported the
+  prior deployment `fdf8e56` / `0.79.20` with `/api/health/live` and
+  `/api/health` HTTP `200`, `deploymentReady=true`, `database=connected`,
+  `missingEnvVars=[]`. The `0.79.21` deployment was therefore **pending** at
+  that observation; this session did not deploy.
+- **PR #88 recovered, not recreated:** branch
+  `feat/durable-turn-usage-cost-evidence` was merged with current `main`
+  non-destructively (no reset/force-push). The existing Draft PR remains the
+  delivery vehicle. Package version is `0.79.22` for the version gate.
+- **One execution boundary:** PR88 no longer adds `respondTurn`, a
+  module-level last-telemetry value or any second execution wrapper. The
+  merged PR #95 stateless `respondWithExecution` result (response, provider,
+  telemetry, `policyUnavailable`, error) is the single source for routing,
+  counters, usage, attribution and durable evidence.
+- **Policy no-call vs unknown execution:** policy-unavailable is propagated as
+  an explicit request-scoped marker into turn evidence. Durable evidence maps
+  it to `PROVEN_NO_CALL` with zero attempts; missing telemetry without that
+  proof remains `UNAVAILABLE`. Deterministic/JEV/deferred no-call proofs are
+  unchanged. `/start`, valid callbacks and valid-policy provider failures are
+  not reclassified.
+- **Preserved PR88 scope:** additive `turn_evidence_records` /
+  `turn_evidence_attempts`; explicit `trafficPool` (`SERVING` for production
+  routes, `TEST` for the isolated test ingress); exact full-window read-only
+  reconciliation; separate confirmed/unknown/prevented dispatch counts;
+  provider-reported cost copied from the existing projection; no historical
+  backfill, no second cost engine, no billing/entitlement change.
+- **Tests:** existing `check:durable-turn-evidence`,
+  `check:request-scoped-usage` and the disposable-PostgreSQL
+  `test:turn-evidence-durable-db` suite are retained. `check:request-scoped-usage`
+  now targets `respondWithExecution` and adds a policy-failure no-call case;
+  the focused durable-evidence tests add PR95 policy no-call and actual-call
+  cases.
+- **Migrations:** PR88's two additive migrations remain unapplied. Migration
+  validation is authorized only in the disposable PostgreSQL CI service;
+  no VPS, production or runtime database command was executed.
+- **Explicit limits:** no merge, deploy, production migration, paid AI call or
+  Telegram/customer send. Crash-before-turn-completion, invoice reconciliation
+  and a global enforceable spend cap remain open. Required CI on the final PR
+  HEAD is the verification authority.
 
-## Durable turn usage/cost evidence (draft PR, v0.79.15) — 16 November 2026
+
+## AI policy-resolution failure must fail closed (Draft PR, v0.79.21) — 19 November 2026
+
+- Baseline verified: `main` `fdf8e56dad5c7bc4e5ff1f35968dd61b4ade5a6b`
+  (`0.79.20`, PR #94 merged at `2026-11-19T21:04:08Z`). The old PR #94 branch
+  and PR #88 were not modified.
+- **Read-only Render verification:** `/api/health/live` and `/api/health`
+  returned HTTP `200` at `2026-11-19T21:07Z` with `version: "0.79.20"`,
+  exact `commitSha: fdf8e56dad5c7bc4e5ff1f35968dd61b4ade5a6b`,
+  `environment: "production"`, `deploymentReady: true`,
+  `database: "connected"` and `missingEnvVars: []`. This verifies the merged
+  source/version and readiness; it is not a product acceptance, Telegram send
+  or database mutation.
+- **Finding:** `createPolicyBackedAi` returned `deterministicConversationAi`
+  when the policy read threw, persistence failed, or the stored policy was
+  invalid. On a structured free-form request, that lexical fallback could
+  interpret and answer/route the customer message instead of failing safe.
+- **Fix:** policy failure now returns a bounded `policy-unavailable`
+  `ConversationAi` that throws into the existing `AI_FAILURE` / `NEED_HUMAN`
+  safe path. It makes no provider or JEV request and performs no lexical
+  interpretation. The valid-policy and real provider-failure paths are
+  unchanged. `/start` and valid offer callbacks remain protocol-driven and
+  zero-call.
+- **Evidence:** policy-failure turns report `providerAttempts=0`,
+  `modelCallCount=0`, `providerStatus=NOT_CALLED`, no `AI_TURN` usage record
+  and no execution attempts; the customer receives the existing
+  `SAFE_HANDOFF_REPLIES.INVALID_OUTPUT` acknowledgment with
+  `handoffCause=AI_FAILURE`.
+- **Concurrency follow-up:** the first implementation still kept
+  `lastTelemetryValue` / `lastProviderNameInner` on the shared
+  `policyBackedAi` wrapper. Concurrent turns could therefore read another
+  request's provider, telemetry or failure. The wrapper is now stateless and
+  `ConversationAi.respondWithExecution` returns a request-scoped response,
+  provider identity, telemetry and explicit `policyUnavailable` marker.
+  Routing, counters, usage, handoff cause and assistant-provider attribution
+  use only that invocation's result; `resolveTurnCounters` uses the explicit
+  marker, not a mutable provider name, and unknown evidence stays unknown.
+- **Tests:** NEW `check:policy-failure` plus updated `check:ai-provider` and
+  `check:conv-core-03b2a`; mocked policy/provider boundaries only. NEW
+  `check:policy-failure-scope` drives the real stateless wrapper with
+  controlled/deferred promises across both completion orders for policy
+  failure vs success, policy failure vs provider failure, and two successful
+  providers with different model/token evidence. Required CI on the PR HEAD
+  is the verification authority.
+- **Not done:** no merge, deploy, production DB access, migration,
+  Telegram/customer send or paid AI call. No provider removal, registry
+  retirement, pricing, billing or persistence change.
+
+## Conversation Lab alignment with current semantic architecture (Draft PR, v0.79.20) — 19 November 2026
+
+- Baseline verified: `main` `c19365e731a985af77988749078c346fe89d2f06`
+  (`0.79.19`, PR #93 merged). The unrelated booking/delivery/transcript branch
+  was left untouched.
+- **Scope:** `/platform/conversation-lab` only — no runtime semantic, booking,
+  disclosure, safety, tenant, delivery, provider, webhook, secret or database
+  change; no key removal or migration.
+- **Inventory:** 37 current operational templates + 1 authoritative-data
+  presentation + 9 legacy/fallback-only + 1 unused code (`channel.telegram.start_welcome` has no caller). Only `welcome.intro` is override-connected.
+- **UI/editor:** default operational scope with explicit «كل السجل» inspection;
+  separate relevance/override badges; canonical validator feedback; publish
+  disabled while invalid; dirty comparison against the loaded effective text;
+  unsaved-edit indicator; discard confirmation; drafts preserved on failed
+  publish/readback. Follow-up repair: the editor is read-only from the
+  mutation request through the readback (with a single in-flight guard), a
+  dirty restore/reset requires one explicit confirmation that names both
+  stored-override replacement and local-draft loss, and close/Escape/overlay/
+  swipe are blocked while a write is pending. Existing overrides/history and
+  protected read-only rules are preserved.
+- **Separate finding (not changed):** a policy-resolution failure returns
+  `deterministicConversationAi`, which can lexically interpret structured
+  free-form input and emit legacy templates. A fail-closed replacement and
+  regression cases are proposed in the report; runtime behavior is not changed
+  in this Lab PR.
+- **Verification:** required CI on the PR HEAD is the authority. No paid AI
+  call, Telegram/customer send, production DB access, migration, merge or
+  deployment was performed.
+
+## Booking temporal freshness, truthful delivery visibility & staff transcript identity (Draft PR, v0.79.19) — 19 November 2026
+
+- Baseline verified: `main` `9e887dfccbaa2f990861abc75518f78d1c9fb223`
+  (`0.79.18`, PR #92 merged). PR #88 and Rabet were not touched.
+- **Finding A — expired inherited date:** the booking resume path merged a
+  durable `knownFacts.date` into a NEW request even when that date had already
+  passed, so an unstated-date availability question could reach the server
+  temporal validator as `PAST_DATE`. The inherited date/range/active offer is
+  now pruned against the business-timezone `todayIso` before resume; a date is
+  resumed only while it is a valid ISO date `>= todayIso`. Explicit current-turn
+  date/temporal proposals are exempt and still receive the existing truthful
+  PAST_DATE rejection. No prompt body was changed in place (DECISIONS #48).
+  The exact historical live source (model echo vs durable state) is not
+  retained in evidence; the confirmed engine-side reuse path and the stale
+  context projection are removed.
+- **Finding B — outbound delivery diagnostics:** `TRANSIENT_TRANSPORT_FAILURE`
+  still covers a fetch/network failure, 429 and 5xx. The Telegram boundary now
+  carries bounded `failureStage` (`NETWORK` / `PROVIDER_HTTP` /
+  `PROVIDER_PAYLOAD` / `CREDENTIALS` / `CONNECTION`), validated `httpStatus`
+  and bounded `retryAfterSeconds` through the transport result, engine delivery
+  projection and turn evidence. The exact historical 2026-11-19 cause is not
+  recoverable from the retained log (no status/stage was recorded).
+- **Finding B — operator visibility:** the conversation read model now joins the
+  existing append-only `OUTBOUND_MESSAGE` usage record for each assistant
+  message and exposes `deliveryStatus`; a `FAILURE` bubble renders
+  «لم يتم تأكيد وصول الرد» (never a delivered state). Message rows are not
+  mutated, no retry/outbox/worker was added and no historical message is replayed.
+- **Finding C — duplicate staff bubble:** `submitStaffReply` and the read-only
+  status lookup previously returned Telegram's `providerMessageId` as the
+  `messageId` used by the UI. The next server snapshot contains the persisted
+  `Message.id`, so the optimistic row and the same DB row could both render.
+  Accepted results now return the persisted `staffMessageId` as `messageId` and
+  expose `providerMessageId` separately; legacy accepted claims without a stored
+  message id return no `messageId` (the UI drops the local row and waits for the
+  snapshot). The status-recheck path now reconciles only by the authoritative
+  id. Text/timestamp/sender are never used for deduplication.
+- **Verification (in CI, not on the VPS):** focused additions cover stale
+  inherited date + fresh earliest-availability, valid future continuation,
+  explicit past/future dates, the Cairo local-date boundary, network vs
+  HTTP-429/5xx vs malformed-payload delivery diagnostics, failed-delivery UI
+  presentation, and staff reply identity/status/poll reconciliation. No
+  migration, live send, paid AI call, deploy or application DB write was made.
+
+## Render-targeted Telegram cutover tooling (Draft PR, v0.79.18) — 18 November 2026
+
+- Baseline: PR91 merged at `e1851deec1406d690807440639761152d3d029e1` /
+  `0.79.17`; Render auto-deployed it as `dep-dbv2akqvcj2c73c0a440`
+  (`trigger: new_commit`, live). `/api/health/live` and `/api/health` both
+  return HTTP `200` with version `0.79.17`, exact SHA, `production`, DB
+  `connected`, `deploymentReady=true`, and `missingEnvVars=[]`.
+- Candidate: manual-only `.github/workflows/render-telegram-cutover.yml` +
+  `scripts/render-telegram-cutover.ts`. `operation=preflight` is read-only and
+  default; `operation=apply` is explicit. The destination is pinned to
+  `https://yakfi.onrender.com/api/telegram/webhook`; fixed workspace/service,
+  Business/Connection/Bot, selected `TEST_DATABASE_URL` + `CREDENTIAL_MASTER_KEY`,
+  existing `RENDER_API_KEY` for service/workspace/region verification, exact
+  checkout/deployed SHA, and expected version are required.
+- Preflight resolves the selected bot credential, verifies `getMe`, calls
+  `getWebhookInfo` (current URL, pending count, observation time, allowed
+  updates, sanitized last error), validates pending as a nonnegative integer,
+  and verifies the signed Render `/api/operator/cutover-readiness` proof. It
+  reports observed vs desired `allowed_updates` separately; a matching URL
+  with any extra/missing set is blocked as
+  `ALREADY_AT_DESTINATION_SETTINGS_MISMATCH`, not treated as exact readiness.
+- Apply reruns preflight immediately before mutation, requires pending `0`,
+  the expected current URL, exact checkout/deployed SHA, and exact
+  `allowed_updates: ["message","callback_query"]`; it never enables
+  `drop_pending_updates`, treats a genuinely exact already-at-destination as a
+  zero-write no-op, and returns truthful partial/ambiguous failures without
+  blind retry. Raw `allowed_updates` is validated before normalization:
+  missing, non-array, null, mixed-type or empty-string observations block
+  preflight as `OBSERVED_ALLOWED_UPDATES_MALFORMED` and cannot be exact; with
+  explicit `allowedUpdates`, the switch rejects them as
+  `MALFORMED_ALLOWED_UPDATES` before mutation. When exact `allowedUpdates` is
+  supplied, post-apply verifies the Telegram-observed set exactly
+  (order-insensitive) and rejects extra/missing/malformed raw sets. Legacy
+  callers that omit `allowedUpdates` keep the prior merge/include behavior.
+  Partial apply/reconcile results report post-operation observations only when
+  a real Telegram inspection returned them; otherwise they are `UNKNOWN`, and
+  desired settings are never promoted to observed state.
+- `operation=reconcile` is the explicit guarded corrective path: it requires a
+  fresh preflight, Render current URL, zero backlog, resolved bot identity and
+  signed runtime readiness, then resets the Telegram webhook secret in place
+  and persists the new DB hash with exact allowed updates. It is never
+  automatic after uncertain failure. `getWebhookInfo` cannot reveal the secret;
+  a stored hash alone does not prove synchronization; signed readiness proves
+  bot credential resolution, not webhook secret synchronization or delivery.
+- Added `check:render-telegram-cutover` in CI for fixed Render target/identity,
+  read-only zero mutations, wrong SHA/version/DB/bot/current URL, invalid/
+  unknown/nonzero pending counts, failed signed readiness/unresolved credential,
+  observed-vs-desired already-at-destination, malformed raw observations,
+  exact post-apply sets, setWebhook followed by DB persistence failure,
+  explicit guarded reconciliation, no-automatic-retry partial/ambiguous
+  failures, and observed-versus-desired separation using controlled Telegram
+  responses. CI run `44520995005` passed the code HEAD `8c4afbf` with
+  **35/35** cutover checks, 27/27 Render migration checks, `v0.79.18`, and
+  Playwright 175 passed / 0 failed / 15 skipped after transient infrastructure
+  reruns.
+- RAM observation: the reviewer previously observed approximately **272–281 MiB
+  of a 512 MiB limit over about 46 minutes**; this is a historical idle baseline,
+  not proof of workload capacity.
+- The candidate workflow cannot be dispatched until it exists on `main`
+  (GitHub returned 404 on the candidate ref); no local secret-bearing
+  workaround was used, so no live read-only preflight was executed. No live
+  `setWebhook`/`deleteWebhook`, secret/hash write, Telegram send, paid AI call,
+  migration, application DB write, Blueprint import, Rabet change, or PR88
+  change was performed.
+
+## Render configuration alignment and read-only cutover preflight (Draft PR, v0.79.17) — 18 November 2026
+
+- Baseline: `main` `629d05ffbe2c2dc6ba6d0d807556de518bb0fd7e` / `0.79.16`;
+  PR90 merged. PR88 remains open, Draft, and untouched.
+- Live Render: service `Yakfi` (`srv-dbv0igutlv9c73fe4990`) in
+  `My Workspace` (`tea-db9st3gm7kps73ek9op0`), `ohio`, Starter `0.5c-512mb`,
+  URL `https://yakfi.onrender.com`. Deployment `dep-dbv0vm7f3r2c73ent7ug` is
+  live at `629d05f` / `0.79.16`; `/api/health/live` and `/api/health` return
+  HTTP `200` with `deploymentReady=true`, `database=connected`, and
+  `missingEnvVars=[]`.
+- Configuration: direct transfer of `DATABASE_URL` + `CREDENTIAL_MASTER_KEY`
+  completed; `BETTER_AUTH_SECRET` and `OPENROUTER_API_KEY` present by name only;
+  Render auto-deploy On Commit (`autoDeployTrigger=commit`) for `main`.
+- Candidate: `render.yaml` declared name `yakfi-web` → `Yakfi` and
+  `autoDeployTrigger: off` → `commit`; `CURRENT_STATE.md` and this ledger updated.
+  The existing service is managed through the Render Dashboard/API; the
+  Blueprint has not been imported/applied, and matching names do not prove
+  Blueprint ownership.
+- Read-only cutover preflight: run `44406835170` verified selected DB/bot
+  credential and fixed business/connection/bot identity as `HEALTHY_LOCAL_KEY`
+  with 30 migrations `UP_TO_DATE`; Render readiness HTTP `200`. Telegram
+  `getWebhookInfo` and the signed Render credential-readiness proof were **not**
+  obtained: `production-telegram-repair` check `44406191808` failed
+  `CREDENTIALS_UNAVAILABLE`, and the existing `cutover-main-runtime-dry-run`
+  `44406411920` failed `DESTINATION_NOT_READY` because
+  `switch-test-bot-webhook.ts` is Vercel-hardcoded. No webhook was moved;
+  pending backlog remains **UNKNOWN** and must be checked at actual cutover.
+- No deployment trigger, Blueprint application, secret transfer repetition, key
+  rotation, migration/DB write, Telegram send, paid AI call, Rabet change, or
+  PR88 change was performed in this task.
+
+## PR89 merged and direct Render transfer simplification (Draft PR, v0.79.16) — 18 November 2026
+
+- Verified baseline: PR89 merged into `main` at
+  `a6a2021d0fc83ffc4744c9b7b2747a98e0d83711` / `0.79.15`. Read-only
+  `verify-selected-runtime` run `44326554854` succeeded with credential
+  `HEALTHY_LOCAL_KEY` and migration status `UP_TO_DATE`; no migration was
+  applied.
+- Owner decision: the one-time Render migration uses a direct transfer of the
+  existing `DATABASE_URL` + `CREDENTIAL_MASTER_KEY` from GitHub Actions secrets.
+  Owner keygen, encrypted bundle export, and `owner_restoration_proof` are
+  retained as optional hardened recovery, not required for this migration.
+- Added a manual-only `direct-transfer` mode to
+  `.github/workflows/render-migration-ops.yml` and
+  `scripts/render-vault-tool.ts`: exact 40-char SHA, fixed workspace
+  `tea-db9st3gm7kps73ek9op0` + `ohio` + `web_service` identity, exactly the two
+  allowlisted keys, a forced read-only dry-run in the prepare job before the
+  apply job, per-key `PUT`s preserving unrelated env vars, bounded 15s calls,
+  sanitized outcomes, and honest partial/network failure reporting. No secret
+  values in arguments, artifacts, logs, or reports; no unrelated secret readback.
+- Added focused mocked-provider checks `R7.10`/`R7.11` for wrong
+  SHA/allowlist/workspace/service/region before mutation, zero-write dry-run,
+  only-two-key updates, unrelated env preservation, and sanitized partial/network
+  failures.
+- `render.yaml` keeps `autoDeployTrigger: off` during initial configuration.
+  After readiness, the Render service is switched to On Commit and
+  `render.yaml` is changed to `autoDeployTrigger: commit` so a Blueprint sync
+  cannot disable automatic deploys again.
+- No Render resource creation, secret transfer, deployment, webhook change,
+  Production migration, Telegram send, or paid AI call was executed. No
+  application code changes. PR #88 remains open, Draft, and untouched.
+
+## Render migration preparation and recoverable secrets (draft PR, v0.79.15) — 17 November 2026
 
 - Verified baseline: `main` / `v0.79.14` at
-  `ef3a5d808032155a3ce21364515e62cb2192918b` (PR #87 merged). The new branch
-  `feat/durable-turn-usage-cost-evidence` starts from that exact commit;
-  package version is `0.79.15` (required by the version gate).
-- Added additive migration `20261116120000_durable_turn_evidence`:
-  `turn_evidence_records` (one row per authoritative inbound
-  `customerMessageId`, tenant-scoped unique replay key) and
-  `turn_evidence_attempts` (max 16 bounded per-attempt facts). No ALTERs on
-  existing tables and no historical backfill.
-- Added a validated, content-free DTO/allowlist
-  (`src/lib/validation/turn-evidence.ts`) and a pure projection
-  (`src/features/conversations/server/durable-turn-evidence.ts`). Totals,
-  subtotals, completeness and per-attempt costs are copied from the existing
-  cost result/attempt projection; this is not a second cost engine.
-- Added `TurnEvidenceRepository` (`record`, `reconcile`,
-  `listByConversationWindow`). Identical replay is idempotent; conflicting
-  facts increment conflict counters without replacing history. The
-  reconciliation reader is tenant/conversation/time-window bounded and
-  content-free; provider-reported cost is separate from invoice reconciliation
-  (`NOT_PERFORMED`).
-- Engine wiring: the existing `flowpilot.turn.evidence@v1` log emission is
-  preserved; durable persistence is awaited after the customer outcome is
-  complete and is isolated from it. New `AI_TURN` usage rows now carry the
-  authoritative `messageId`. `trafficPool` is explicit (`SERVING` production,
-  `TEST` dedicated test ingress); shadow is never counted as a paid turn.
-- Required CI: offline `check:durable-turn-evidence` plus disposable-PostgreSQL
-  `test:turn-evidence-durable-db` (successful/fallback/partial/zero/unknown/
-  no-call, replay, concurrency, tenant/conflicting identity, persistence
-  failure, precision/nullability, redaction, payload bounds).
-- Explicit limits: the migration is not applied to Production in this PR; no
-  invoice reconciliation, global spend cap, crash-recovery of in-flight
-  attempts, historical backfill or live acceptance is claimed. Final-HEAD CI
-  results are recorded on the draft PR.
+  `ef3a5d808032155a3ce21364515e62cb2192918b` (PR #87 merged). Separate branch
+  `feat/yakfi-render-migration-prep` starts directly from `ef3a5d80`; draft PR
+  #88 (`74f6594a6982a2c1381c3e86aecd07d9ba026fce`) remains completely untouched.
+- Reproducible Render Node hosting: added `.node-version` (`22`), `render.yaml`
+  (single `starter` `0.5c-512mb` native Node web service in `ohio` near Neon
+  `us-east-2`, `autoDeployTrigger: off`, `healthCheckPath: /api/health/live`,
+  frozen-lockfile `pnpm@11.24.0 --prod=false` + `pnpm db:generate` + `pnpm build`,
+  `start:render` on `0.0.0.0:$PORT`, zero live migrations/seed/cron/worker/Redis/
+  disk).
+- Platform-neutral hosting & readiness repairs: moved `/sw.js` and
+  `/offline.html` `Cache-Control: public, max-age=0, must-revalidate` from
+  `vercel.json` into `next.config.ts` `headers()`; added `RENDER_GIT_COMMIT`
+  support (`src/lib/runtime-identity.ts`) across `/api/health`,
+  `/api/health/live`, and `/api/operator/cutover-readiness`; fixed `/api/health`
+  to return HTTP `503` (`status: "degraded"`) whenever `deploymentReady` is
+  `false` while introducing zero-DB `/api/health/live` so continuous platform
+  probes do not block Neon idle suspension; hardened `isQaHarnessAllowed` and
+  JEV production budget checks for `RENDER=true`; updated
+  `production-release.yml` + `scripts/verify-production-release.mjs` to require
+  explicit target + exact 40-char `commitSha` with no automatic unverified tags.
+- Recoverable secrets & cutover runbook: added values-free inventory
+  `config/render-env-inventory.json`, owner-encrypted X25519/AES-256-GCM bundle
+  with local restoration check and allowlisted `tea-db9st3gm7kps73ek9op0`
+  transfer tool (`scripts/render-vault-tool.ts`), manual-only workflow
+  (`.github/workflows/render-migration-ops.yml`, not executed), and ordered
+  cutover/backlog/anti-split-brain/rollback runbook in canonical docs.
+- Required CI: wired offline `check:render-migration` and real-Node
+  (`next start`) + disposable-PostgreSQL `check:render-runtime-db` (verifying
+  headers, HTTP 503 readiness failure, exact SHA, Better Auth origins/cookies,
+  and real `next/server` `after()` execution with controlled mocks). Repaired
+  CI run `44177671953` `DB7` harness defects (missing default `Branch` on the
+  synthetic test `Business`, `aiResponseSchema`-compliant OpenRouter mock body,
+  `webhookBody.success` contract check, and `Request`-preserving preload
+  fetch). Verified on the new Boxd VPS that old VPS local files, `rclone`, and
+  Agent Handoff did not survive, `RENDER_API_KEY` is absent from GitHub
+  secrets, and zero encrypted bundles have been exported yet. Added focused
+  recovery/transfer hardening: pre-service `export-encrypted-bundle`
+  (`PRE_SERVICE_CREATION` while keeping strict `srv-...`/workspace checks for
+  transfer), exclusive `0600` `keygen` refusing existing files and symlinks,
+  two-job backup-before-transfer delivering ciphertext before remote `PUT`s with
+  required values-free `owner_restoration_proof`, private-key CI ban, and
+  `always()` artifact preservation across partial/network failures, plus
+  read-only zero-Telegram `verify-selected-runtime` decryption preflight tested
+  against disposable fixtures (`check:render-migration` +
+  `check:render-runtime-db`). Hardened `verifyRenderServiceOwnership` to reject
+  missing, empty, malformed, or wrong `serviceDetails.region` before any `PUT`,
+  and fixed `render-migration-ops.yml` read-only `prisma migrate status` to
+  preserve the real exit code, clean up redacted files on `EXIT`, distinguish
+  credential decryption from migration status, and fail `NOT_READY` without
+  applying migrations on pending/failed/divergent states. Verified actual
+  `package.json` version on `feat/yakfi-render-migration-prep` (including
+  `a0cf117`) is `0.79.15` over `main` `0.79.14` (`0.79.16` in the earlier chat
+  summary was a reporting typo; historical reports and PR #88 remain untouched).
+  `512 MB` live capacity, Render credit details, and live deployment remain
+  unexecuted owner actions.
 
 ## Acceptance evidence completion and CI wiring — 16 November 2026
 
@@ -3361,7 +3640,10 @@ E2E` from a FRESH launch and record whether the whole
 
 ## Next Step
 
-Current next step: follow the reviewer recovery checkpoint above. The entries below are historical, not new execution instructions.
+Current next step (19 November 2026): review the single Draft PR for v0.79.19
+after required GitHub Actions CI passes; verify the targeted Muse retest plan
+on a reviewed deployment before any merge/deploy. The entries below are
+historical, not new execution instructions.
 
 **AWAITING CI & OPERATOR REVIEW — PR (feat/conv-core-03d2-semantic-safety) CORE-03D2**:
 Branch `feat/conv-core-03d2-semantic-safety` ready with Semantic Safety Ownership and False-Handoff Repair (v0.67.0).

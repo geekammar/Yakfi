@@ -3,11 +3,13 @@ import type {
   ConversationRefreshData,
   InboxConversation,
   InboxUser,
+  MessageDeliveryStatus,
 } from "@/features/conversations/types";
 import {
   appointmentRepository,
   conversationRepository,
   operatorAttentionRepository,
+  usageRepository,
   userRepository,
 } from "@/server/repositories";
 
@@ -20,20 +22,47 @@ type DetailAppointments = Awaited<
   ReturnType<typeof appointmentRepository.listRecentByCustomer>
 >;
 
-function projectMessages(conversation: DetailConversation) {
-  return conversation.messages.map((message) => ({
-    id: message.id,
-    senderType: message.senderType,
-    content: message.content,
-    displayText: resolveDisplayForMessage({
+function projectMessages(
+  conversation: DetailConversation,
+  deliveryStatuses: ReadonlyMap<string, MessageDeliveryStatus> = new Map(),
+) {
+  return conversation.messages.map((message) => {
+    const deliveryStatus = deliveryStatuses.get(message.id);
+    return {
+      id: message.id,
       senderType: message.senderType,
       content: message.content,
-      displayText: message.displayText,
-      metadata: message.metadata,
-    }),
-    metadata: message.metadata ?? null,
-    createdAt: message.createdAt.toISOString(),
-  }));
+      displayText: resolveDisplayForMessage({
+        senderType: message.senderType,
+        content: message.content,
+        displayText: message.displayText,
+        metadata: message.metadata,
+      }),
+      metadata: message.metadata ?? null,
+      ...(deliveryStatus ? { deliveryStatus } : {}),
+      createdAt: message.createdAt.toISOString(),
+    };
+  });
+}
+
+async function loadDeliveryStatuses(
+  businessId: string,
+  conversation: DetailConversation,
+): Promise<ReadonlyMap<string, MessageDeliveryStatus>> {
+  const assistantMessageIds = conversation.messages
+    .filter((message) => message.senderType === "AI")
+    .map((message) => message.id);
+  try {
+    return await usageRepository.listOutboundDeliveryStatuses({
+      businessId,
+      conversationId: conversation.id,
+      messageIds: assistantMessageIds,
+    });
+  } catch {
+    // Delivery evidence is display-only: a read failure must not hide the
+    // transcript. Absence is shown as "no recorded outcome", never delivered.
+    return new Map();
+  }
 }
 
 function projectAppointments(appointments: DetailAppointments) {
@@ -126,12 +155,13 @@ export async function getConversationDetail(
     resolvedById: currentUserId,
   });
 
-  const [appointments, users] = await Promise.all([
+  const [appointments, users, deliveryStatuses] = await Promise.all([
     appointmentRepository.listRecentByCustomer(
       businessId,
       conversation.customerId,
     ),
     userRepository.listByBusiness({ businessId }, { pageSize: 100 }),
+    loadDeliveryStatuses(businessId, conversation),
   ]);
 
   return {
@@ -149,7 +179,7 @@ export async function getConversationDetail(
     },
     assignedUser: conversation.assignedTo,
     currentUserId,
-    messages: projectMessages(conversation),
+    messages: projectMessages(conversation, deliveryStatuses),
     appointments: projectAppointments(appointments),
     team: users
       .filter((user) => user.isActive)
@@ -177,14 +207,16 @@ export async function getConversationRefresh(
   );
   if (!conversation) return null;
 
-  const [openAttention, appointments, users] = await Promise.all([
-    operatorAttentionRepository.findOpen(conversationId),
-    appointmentRepository.listRecentByCustomer(
-      businessId,
-      conversation.customerId,
-    ),
-    userRepository.listByBusiness({ businessId }, { pageSize: 100 }),
-  ]);
+  const [openAttention, appointments, users, deliveryStatuses] =
+    await Promise.all([
+      operatorAttentionRepository.findOpen(conversationId),
+      appointmentRepository.listRecentByCustomer(
+        businessId,
+        conversation.customerId,
+      ),
+      userRepository.listByBusiness({ businessId }, { pageSize: 100 }),
+      loadDeliveryStatuses(businessId, conversation),
+    ]);
 
   return {
     id: conversation.id,
@@ -193,7 +225,7 @@ export async function getConversationRefresh(
     assignedUser: conversation.assignedTo,
     attentionReason: openAttention?.reason ?? null,
     attentionCause: openAttention?.cause ?? null,
-    messages: projectMessages(conversation),
+    messages: projectMessages(conversation, deliveryStatuses),
     appointments: projectAppointments(appointments),
     team: users
       .filter((user) => user.isActive)

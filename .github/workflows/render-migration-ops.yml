@@ -1,0 +1,386 @@
+name: Render Secret Recovery & Allowlisted Transfer (Manual Only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Manual operation (never runs in PR CI)"
+        required: true
+        type: choice
+        default: "verify-selected-runtime"
+        options:
+          - "verify-selected-runtime"
+          - "inspect-sources"
+          - "export-encrypted-bundle"
+          - "transfer-to-render"
+          - "direct-transfer"
+      expected_commit_sha:
+        description: "Exact 40-char reviewed commit SHA matching checked-out ref"
+        required: true
+        type: string
+      render_service_id:
+        description: "Confirmed Render service ID in My Workspace (srv-...; required for direct-transfer/transfer-to-render, optional before service exists)"
+        required: false
+        type: string
+        default: ""
+      owner_recipient:
+        description: "Optional owner X25519 public recipient for encrypted recovery (yakfi-rcpt-v1:...); unused by direct-transfer"
+        required: false
+        type: string
+        default: ""
+      owner_restoration_proof:
+        description: "Encrypted-transfer apply proof from local verify-bundle (yakfi-verified-v1:...); unused by direct-transfer"
+        required: false
+        type: string
+        default: ""
+      allowlist:
+        description: "Comma-separated allowlisted keys; direct-transfer requires both (DATABASE_URL,CREDENTIAL_MASTER_KEY)"
+        required: false
+        type: string
+        default: "DATABASE_URL,CREDENTIAL_MASTER_KEY"
+      dry_run:
+        description: "Keep true for read-only preflight; direct-transfer apply still performs a fresh dry-run before writes"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-migration-ops-singleton
+  cancel-in-progress: false
+
+jobs:
+  prepare-and-deliver-backup:
+    name: Preflight & Deliver Encrypted Backup (${{ inputs.mode }})
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Require exact reviewed 40-char SHA and forbid private keys
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_commit_sha }}
+          ACTUAL_SHA: ${{ github.sha }}
+          RECIPIENT_INPUT: ${{ inputs.owner_recipient }}
+          PROOF_INPUT: ${{ inputs.owner_restoration_proof }}
+          MODE_INPUT: ${{ inputs.mode }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          SERVICE_ID_INPUT: ${{ inputs.render_service_id }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$EXPECTED_SHA" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo '::error::expected_commit_sha must be a full 40-character lowercase hex SHA.'
+            exit 1
+          fi
+          if [ "$EXPECTED_SHA" != "$ACTUAL_SHA" ]; then
+            echo '::error::expected_commit_sha does not match checked-out SHA; refusing secret operation.'
+            exit 1
+          fi
+          if printf '%s\n%s' "$RECIPIENT_INPUT" "$PROOF_INPUT" | grep -Eiq 'yakfi-priv-v1:|PRIVATE[ _]?KEY'; then
+            echo '::error::PRIVATE_KEY_INPUT_FORBIDDEN: never supply an owner private key to CI.'
+            exit 1
+          fi
+          if [ "$MODE_INPUT" = "direct-transfer" ]; then
+            if ! printf '%s' "$SERVICE_ID_INPUT" | grep -Eq '^srv-[a-z0-9]{16,32}$'; then
+              echo '::error::render_service_id must be the confirmed srv-... service in My Workspace.'
+              exit 1
+            fi
+          fi
+          if [ "$MODE_INPUT" = "transfer-to-render" ] && [ "$DRY_RUN_INPUT" = "false" ]; then
+            if ! printf '%s' "$PROOF_INPUT" | grep -Eq '^yakfi-verified-v1:[A-Za-z0-9_-]{32,}$'; then
+              echo '::error::OWNER_RESTORATION_VERIFICATION_REQUIRED before applying secrets to Render.'
+              exit 1
+            fi
+          fi
+
+      - name: Checkout exact reviewed commit without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install locked dependencies without secrets
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Direct-transfer dry-run (read-only, zero writes)
+        if: inputs.mode == 'direct-transfer'
+        env:
+          EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}
+          GITHUB_SHA: ${{ github.sha }}
+          RENDER_SERVICE_ID: ${{ inputs.render_service_id }}
+          RENDER_API_KEY_SOURCE: ${{ secrets.RENDER_API_KEY }}
+          ALLOWLIST: ${{ inputs.allowlist }}
+          DRY_RUN: "true"
+          TEST_DATABASE_URL_SOURCE: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY_SOURCE: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+        run: pnpm exec tsx scripts/render-vault-tool.ts direct-transfer
+
+      - name: Verify selected runtime DB decryption pairing (read-only, zero Telegram calls)
+        id: decryption_preflight
+        if: >-
+          inputs.mode == 'verify-selected-runtime' ||
+          inputs.mode == 'export-encrypted-bundle' ||
+          inputs.mode == 'transfer-to-render'
+        env:
+          EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}
+          GITHUB_SHA: ${{ github.sha }}
+          TEST_DATABASE_URL_SOURCE: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY_SOURCE: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+        run: |
+          set -uo pipefail
+          set +e
+          OUTPUT=$(pnpm exec tsx scripts/render-vault-tool.ts verify-selected-runtime)
+          PREFLIGHT_EXIT=$?
+          set -e
+          printf '%s\n' "$OUTPUT"
+          DEC_STATUS=$(printf '%s\n' "$OUTPUT" | sed -n 's/^status: //p' | head -n 1)
+          DEC_CODE=$(printf '%s\n' "$OUTPUT" | sed -n 's/^code: //p' | head -n 1)
+          echo "credential_status=${DEC_STATUS:-UNKNOWN}" >> "$GITHUB_OUTPUT"
+          if [ "${DEC_CODE:-}" = "DATABASE_TARGET_NOT_AUTHORIZED" ] || [ "${DEC_CODE:-}" = "MISSING_DATABASE_URL" ] || [ "${DEC_CODE:-}" = "INVALID_DATABASE_URL" ]; then
+            echo "db_target_authorized=false" >> "$GITHUB_OUTPUT"
+          elif [ -n "${DEC_STATUS:-}" ]; then
+            echo "db_target_authorized=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "db_target_authorized=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$PREFLIGHT_EXIT" -ne 0 ] || [ "${DEC_STATUS:-}" != "HEALTHY_LOCAL_KEY" ]; then
+            echo '::error::Selected runtime key failed read-only credential decryption preflight.'
+            exit "${PREFLIGHT_EXIT:-1}"
+          fi
+
+      - name: Check selected database migration status (read-only)
+        if: >-
+          !cancelled() &&
+          inputs.mode == 'verify-selected-runtime' &&
+          steps.decryption_preflight.outputs.db_target_authorized == 'true'
+        env:
+          DATABASE_URL: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_STATUS: ${{ steps.decryption_preflight.outputs.credential_status }}
+        run: |
+          set -uo pipefail
+          trap 'rm -f status-selected.raw.txt status-selected.txt' EXIT
+          MIGRATE_URL="${DATABASE_URL/-pooler./.}"
+          set +e
+          DATABASE_URL="$MIGRATE_URL" pnpm exec prisma migrate status > status-selected.raw.txt 2>&1
+          MIGRATE_EXIT_CODE=$?
+          set -e
+          sed -E \
+            -e 's#(postgres(ql)?://)[^@[:space:]]+@#\1***:***@#g' \
+            -e 's#([?&](password|sslpassword|token|api_key|secret)=)[^&[:space:]]+#\1***#gi' \
+            status-selected.raw.txt > status-selected.txt
+          rm -f status-selected.raw.txt
+          pnpm exec tsx scripts/render-vault-tool.ts evaluate-migration-status \
+            --status-file status-selected.txt \
+            --exit-code "$MIGRATE_EXIT_CODE" \
+            --credential-status "${CREDENTIAL_STATUS:-UNKNOWN}"
+
+      - name: Execute values-free source inspection
+        if: inputs.mode == 'inspect-sources'
+        env:
+          TEST_DATABASE_URL_SOURCE: ${{ secrets.TEST_DATABASE_URL }}
+          PROD_DATABASE_URL_SOURCE: ${{ secrets.PRODUCTION_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY_SOURCE: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+          VERCEL_TOKEN_SOURCE: ${{ secrets.VERCEL_TOKEN }}
+          RENDER_API_KEY_SOURCE: ${{ secrets.RENDER_API_KEY }}
+          RENDER_SERVICE_ID: ${{ inputs.render_service_id }}
+        run: pnpm exec tsx scripts/render-vault-tool.ts inspect-sources
+
+      - name: Export pre-service or pre-transfer encrypted owner bundle (zero remote mutation)
+        if: inputs.mode == 'export-encrypted-bundle'
+        env:
+          EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}
+          GITHUB_SHA: ${{ github.sha }}
+          RENDER_SERVICE_ID: ${{ inputs.render_service_id }}
+          OWNER_RECIPIENT: ${{ inputs.owner_recipient }}
+          ALLOWLIST: ${{ inputs.allowlist }}
+          TEST_DATABASE_URL_SOURCE: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY_SOURCE: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/yakfi-encrypted-out
+          chmod 700 /tmp/yakfi-encrypted-out
+          pnpm exec tsx scripts/render-vault-tool.ts export-encrypted-bundle \
+            --bundle-out /tmp/yakfi-encrypted-out/yakfi-secrets.enc.json
+
+      - name: Stage encrypted backup and verify Render target before any mutation
+        if: inputs.mode == 'transfer-to-render'
+        env:
+          EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}
+          GITHUB_SHA: ${{ github.sha }}
+          RENDER_SERVICE_ID: ${{ inputs.render_service_id }}
+          RENDER_API_KEY_SOURCE: ${{ secrets.RENDER_API_KEY }}
+          OWNER_RECIPIENT: ${{ inputs.owner_recipient }}
+          OWNER_RESTORATION_PROOF: ${{ inputs.owner_restoration_proof }}
+          ALLOWLIST: ${{ inputs.allowlist }}
+          DRY_RUN: "true"
+          TEST_DATABASE_URL_SOURCE: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY_SOURCE: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/yakfi-encrypted-out
+          chmod 700 /tmp/yakfi-encrypted-out
+          pnpm exec tsx scripts/render-vault-tool.ts transfer-to-render \
+            --bundle-out /tmp/yakfi-encrypted-out/yakfi-secrets.enc.json
+
+      - name: Check whether ciphertext bundle was produced
+        id: bundle_check
+        if: >-
+          always() &&
+          (inputs.mode == 'export-encrypted-bundle' || inputs.mode == 'transfer-to-render')
+        run: |
+          if [ -s /tmp/yakfi-encrypted-out/yakfi-secrets.enc.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload ciphertext-only owner bundle before any remote mutation (1-day retention)
+        if: >-
+          always() &&
+          steps.bundle_check.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: yakfi-owner-encrypted-bundle
+          path: /tmp/yakfi-encrypted-out/yakfi-secrets.enc.json
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Remove temporary ciphertext directory
+        if: always()
+        run: rm -rf /tmp/yakfi-encrypted-out
+
+  apply-render-transfer:
+    name: Apply Verified Allowlisted Secrets to Render
+    needs:
+      - prepare-and-deliver-backup
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.mode == 'transfer-to-render' &&
+      inputs.dry_run == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact reviewed commit without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install locked dependencies without secrets
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply allowlisted secrets to confirmed Render service (ciphertext preserved on failure)
+        env:
+          EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}
+          GITHUB_SHA: ${{ github.sha }}
+          RENDER_SERVICE_ID: ${{ inputs.render_service_id }}
+          RENDER_API_KEY_SOURCE: ${{ secrets.RENDER_API_KEY }}
+          OWNER_RECIPIENT: ${{ inputs.owner_recipient }}
+          OWNER_RESTORATION_PROOF: ${{ inputs.owner_restoration_proof }}
+          ALLOWLIST: ${{ inputs.allowlist }}
+          DRY_RUN: "false"
+          TEST_DATABASE_URL_SOURCE: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY_SOURCE: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/yakfi-encrypted-out
+          chmod 700 /tmp/yakfi-encrypted-out
+          pnpm exec tsx scripts/render-vault-tool.ts transfer-to-render \
+            --bundle-out /tmp/yakfi-encrypted-out/yakfi-secrets.enc.json
+
+      - name: Check whether apply-job ciphertext bundle exists
+        id: apply_bundle_check
+        if: always()
+        run: |
+          if [ -s /tmp/yakfi-encrypted-out/yakfi-secrets.enc.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Preserve apply-attempt ciphertext bundle even on partial or network failure
+        if: >-
+          always() &&
+          steps.apply_bundle_check.outputs.present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: yakfi-owner-encrypted-bundle-apply
+          path: /tmp/yakfi-encrypted-out/yakfi-secrets.enc.json
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Remove temporary ciphertext directory after artifact preservation
+        if: always()
+        run: rm -rf /tmp/yakfi-encrypted-out
+
+  apply-direct-transfer:
+    name: Apply Direct Allowlisted Secrets to Render
+    needs:
+      - prepare-and-deliver-backup
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.mode == 'direct-transfer' &&
+      inputs.dry_run == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact reviewed commit without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install locked dependencies without secrets
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Apply direct allowlisted secrets to confirmed Render service
+        env:
+          EXPECTED_COMMIT_SHA: ${{ inputs.expected_commit_sha }}
+          GITHUB_SHA: ${{ github.sha }}
+          RENDER_SERVICE_ID: ${{ inputs.render_service_id }}
+          RENDER_API_KEY_SOURCE: ${{ secrets.RENDER_API_KEY }}
+          ALLOWLIST: ${{ inputs.allowlist }}
+          DRY_RUN: "false"
+          TEST_DATABASE_URL_SOURCE: ${{ secrets.TEST_DATABASE_URL }}
+          CREDENTIAL_MASTER_KEY_SOURCE: ${{ secrets.CREDENTIAL_MASTER_KEY }}
+        run: pnpm exec tsx scripts/render-vault-tool.ts direct-transfer

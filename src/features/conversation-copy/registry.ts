@@ -9,9 +9,10 @@
  * metadata / default source in a later slice.
  *
  * Preservation contract (binding for this slice):
- *  - `defaultText` is the CURRENT production wording, byte-for-byte. Wording
- *    improvements are a later task (BOOK-UX-01); this registry deliberately
- *    ships the exact present-day text, awkward phrasing included.
+ *  - `defaultText` follows the CURRENT production wording. Verified drifts
+ *    are recorded as Lab runtime notes and are NOT silently rewritten here,
+ *    because changing placeholders/defaults can invalidate stored overrides;
+ *    wording repairs remain a separate reviewed copy-contract task.
  *  - EDITABLE_TEMPLATE `defaultText` carries `{placeholder}` tokens from the
  *    closed PLACEHOLDER_VALUES set only.
  *  - PROTECTED_COPY (the handoff / safety acknowledgments) is registered so
@@ -891,11 +892,15 @@ export const COPY_REGISTRY = [
 
   // ── channel.* — deterministic CHANNEL-LEVEL copy (UX-LAB-01A2) ──────────
   //
-  // Copy a channel/transport owns outright and emits ITSELF, outside the
-  // shared Conversation Engine. One family for every channel — there is no
-  // per-channel registry; a semantic reply several channels share stays a
-  // single canonical key. Only genuinely channel-owned, customer-bound,
-  // deterministic text lives here.
+  // Copy a channel/transport can own outright, outside the shared Conversation
+  // Engine. One family for every channel — there is no per-channel registry; a
+  // semantic reply several channels share stays a single canonical key.
+  //
+  // VERIFIED RUNTIME NOTE: `channel.telegram.start_welcome` is still declared
+  // and exported, but the current customer `/start` path dispatches into the
+  // Conversation Engine and emits `welcome.intro`; the constant below has no
+  // caller. It is classified as unused code in the Lab and is preserved here
+  // until a separate decision retires or reconnects it.
 
   {
     key: "channel.telegram.start_welcome",

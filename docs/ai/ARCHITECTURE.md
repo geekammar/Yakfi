@@ -23,8 +23,12 @@
 > isolated and independently removable — see `docs/ai/PROVIDERS.md`). The
 > engine default is the **policy-backed** `ConversationAi`
 > (`createPolicyBackedAi` in `conversation-engine.ts`), which builds the
-> real adapters from the live policy and falls back to
-> `deterministicConversationAi` only when the policy cannot be read.
+> real adapters from the live policy. When the policy cannot be read, a
+> persistence failure occurs, or the stored policy is invalid, it returns a
+> bounded unavailable assistant — never the lexical
+> `deterministicConversationAi` — so the turn fails closed through the
+> existing `AI_FAILURE` / `NEED_HUMAN` safe path with zero provider/JEV
+> calls.
 
 ## Invariant (binding)
 
@@ -67,7 +71,8 @@ AI interprets → Domain decides & executes → Conversation Engine orchestrates
          │
          ▼
   ConversationAi  (interface — provider-neutral)
-    deterministicConversationAi  ◀── safe fallback (no LLM)
+    bounded unavailable assistant ◀── policy read/persistence/invalid failure (no call)
+    deterministicConversationAi  ◀── explicit offline/non-structured helper only
     openrouter adapter           ◀── selectable via platform AI policy
     agentrouter adapter          ◀── selectable (see AGENTROUTER_KNOWN_ISSUE.md)
     atria adapter                ◀── selectable (see PROVIDERS.md)
@@ -375,11 +380,14 @@ turn_evidence_records + turn_evidence_attempts
   different substantive facts increment `conflictCount` and never replace the
   historical row. New `AI_TURN` usage rows carry the same `messageId`;
   historical rows without it remain explicitly unresolved.
-- **Request-scoped provider telemetry:** the production policy-backed wrapper
-  creates a request-local adapter and returns response, provider identity and
-  telemetry together through `respondTurn`. There is no module-level "last
-  telemetry" value; a failed call cannot inherit a previous call's tokens,
-  cost, model or provider.
+- **Request-scoped execution boundary:** the production policy-backed wrapper
+  creates a request-local adapter and returns response, provider identity,
+  telemetry and the explicit `policyUnavailable` marker together through
+  `respondWithExecution`. There is no module-level "last telemetry" value and
+  no second execution wrapper; a failed call cannot inherit a previous call's
+  tokens, cost, model or provider. The durable projection reuses that exact
+  result, so policy no-call is `PROVEN_NO_CALL` while missing telemetry
+  remains `UNAVAILABLE`.
 - **Execution proof:** `executionEvidence` is `RECORDED`, `PROVEN_NO_CALL`, or
   `UNAVAILABLE`. An empty attempt list is no-call ONLY for authoritative
   deterministic/deferred outcomes; missing telemetry is `UNAVAILABLE`.
@@ -880,9 +888,15 @@ not scaffold them here.
 
 - The engine default is the policy-backed `ConversationAi`
   (`defaultConversationEngineDeps.ai` = `policyBackedAi` →
-  `createPolicyBackedAi`): real adapters when the policy is readable,
-  `deterministicConversationAi` as the safe fallback. `bypassDeterministicAi`
-  still short-circuits decidable turns before any provider call.
+  `createPolicyBackedAi`): real adapters when the policy is readable. The
+  production wrapper is stateless; each turn receives a request-scoped
+  execution result carrying its own response, provider identity, telemetry and
+  explicit policy-unavailable marker, so concurrent turns cannot exchange
+  evidence. A policy read/persistence/invalid failure yields the bounded
+  unavailable assistant, which throws into the existing `AI_FAILURE` /
+  `NEED_HUMAN` safe path with zero provider/JEV calls — never the lexical
+  assistant. `bypassDeterministicAi` still short-circuits decidable turns
+  before any provider call.
 - Cost-impacting telemetry is already implemented for the LLM path
   (`conversation-engine.ts` `recordUsage(AI_TURN)` + `usageRepository`);
   determinism is preserved by the Domain, not by withholding the boundary.

@@ -124,8 +124,15 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
 | 107 | Single Production runtime consolidation preparation (not executed) | runtime topology/DB-key pairing/CI isolation | [#107](DECISIONS.md) |
 | 108 | Conversation live refresh without draft loss: authenticated read-only refresh action + 5s visible-tab polling, safe merge, no attention/booking/delivery writes | touching conversation detail freshness/polling/draft preservation | [#108](DECISIONS.md) |
 | 109 | Authoritative service-price source alignment: expose authorized service ids, require exact id for `service.price`, preserve stored price shape; clear stale attention after Return to assistant | pricing answers/service.price prompt or gate/attention display | [#109](DECISIONS.md) |
-| 110 | Durable turn usage/cost evidence: bounded content-free projection, stable message identity, replay/conflict semantics, explicit pools, read-only reconciliation | turn cost evidence/persistence/reconciliation | [#110](DECISIONS.md) |
-| 111 | PR88 repair: request-scoped telemetry, required pool scope, exact full-window reconciliation, execution-proof/dispatch honesty | durable evidence concurrency/pools/reconciliation/unknown execution | [#111](DECISIONS.md) |
+| 110 | Render single-service Node migration prep & recoverable secrets: `render.yaml`, `next.config.ts` PWA headers, `RENDER_GIT_COMMIT`, zero-DB `/api/health/live` vs HTTP 503 `/api/health`, exact-SHA release gate, values-free inventory + owner-encrypted X25519/GCM recovery & cutover runbook | Render hosting/health/release gate/secret recovery/cutover | [#110](DECISIONS.md) |
+| 111 | Direct Render secret transfer: owner-approved manual-only `direct-transfer` mode for `DATABASE_URL` + `CREDENTIAL_MASTER_KEY` from GitHub Actions secrets to confirmed `yakfi-web`/`ohio`; forced dry-run before per-key apply; optional encrypted recovery retained | Render secret transfer/direct transfer | [#111](DECISIONS.md) |
+| 112 | Booking temporal freshness (never resume expired dates/offers into a new request), bounded outbound delivery diagnostics + truthful failed-delivery display, and staff reply identity = persisted `Message.id` (provider id separate) | inherited booking dates/PAST_DATE, delivery failure visibility/diagnostics, staff reply duplicate/identity reconciliation | [#112](DECISIONS.md) |
+| 113 | Conversation Lab alignment: separate runtime relevance from override connection, hide legacy/unused paths from the default operational view, canonical-validator editor feedback, dirty/discard handling, preserve drafts on failed publish/readback; no runtime semantic change | Conversation Lab labels/filtering/editor behavior, runtime-vs-override classification, Lab dirty/discard semantics | [#113](DECISIONS.md) |
+| 114 | AI policy-resolution failure fails closed: bounded `policy-unavailable` assistant enters existing `AI_FAILURE` / `NEED_HUMAN` path with zero provider/JEV calls, no lexical fallback, truthful zero-call evidence | policy read/persistence/invalid failure, AI failure evidence, safe handoff | [#114](DECISIONS.md) |
+| 115 | Request-scoped policy-failure evidence: stateless policy wrapper + optional `respondWithExecution` result; no shared last provider/telemetry; explicit no-call marker; unknown evidence never forced to zero | concurrent AI turns, policy failure attribution/counters/usage | [#115](DECISIONS.md) |
+
+| 116 | Durable turn usage/cost evidence: bounded content-free projection, stable message identity, replay/conflict semantics, explicit pools, read-only reconciliation | turn cost evidence/persistence/reconciliation | [#116](DECISIONS.md) |
+| 117 | PR88 repair: request-scoped execution reuse, required pool scope, exact full-window reconciliation, execution-proof/dispatch honesty | durable evidence concurrency/pools/reconciliation/unknown execution | [#117](DECISIONS.md) |
 
 ## Historical decisions (never load unless doing forensics)
 
@@ -146,9 +153,16 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
   merged through PR #84 (`b485bda`, `v0.79.11`) but its later live acceptance is
   not claimed here. Decision #109 merged through PR #85 (`e5ff129`, `v0.79.12`).
   PR #86 merged booking concurrency/tenant-isolation evidence as `472e9aa` /
-  `v0.79.13`; PR #87 merged the evidence-completion branch as `ef3a5d8` /
-  `v0.79.14`. Decisions #110/#111 are the current candidate (`v0.79.15`,
-  draft PR #88): additive durable evidence plus the focused concurrency, pool,
-  reconciliation and execution-proof repairs. Production live acceptance is
-  separately blocked by HTTP 402 / DEPLOYMENT_DISABLED (observed
-  2026-11-16T21:12Z), not attributed to PR88.
+  `v0.79.13`; the current evidence-completion branch is test/documentation work
+  and does not change a product decision. Decision #111 adds the owner-approved
+  direct Render secret transfer path (draft PR, not applied); it does not
+  require keygen, an encrypted bundle, or `owner_restoration_proof`.
+- Decision #112 is a draft repair (v0.79.19) for inherited booking temporal
+  freshness, bounded outbound delivery diagnostics/visibility, and staff reply
+  transcript identity. It is not merged, deployed or live-retested.
+- Decisions #116/#117 are the refreshed draft PR #88 candidate
+  (`v0.79.22`) on top of PR #95's merged `0.79.21` / `9187655`. The durable
+  evidence path reuses the merged request-scoped `respondWithExecution`
+  boundary; it does not introduce a second execution wrapper or shared
+  last-provider/telemetry state. The additive migrations remain unapplied and
+  no merge, deploy or production migration is claimed.

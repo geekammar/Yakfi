@@ -390,6 +390,9 @@ async function run() {
       harness.business.id,
     );
     const now = new Date();
+    const offerDate = new Date(now.getTime() + 2 * 86_400_000)
+      .toISOString()
+      .slice(0, 10);
     const testOffer = {
       id: "off-b-01",
       token: "off00001",
@@ -399,7 +402,7 @@ async function run() {
       serviceId: services[0]!.id,
       serviceName: services[0]!.name,
       serviceSource: "CUSTOMER" as const,
-      date: "2026-10-25",
+      date: offerDate,
       providerId: null,
       followUpRequestId: null,
       shownCount: 1,
@@ -408,8 +411,8 @@ async function run() {
           index: 1,
           providerId: "prov-1",
           displayName: "د. سارة",
-          startAt: "2026-10-25T10:00",
-          endAt: "2026-10-25T10:30",
+          startAt: `${offerDate}T10:00`,
+          endAt: `${offerDate}T10:30`,
         },
       ],
       issuedAt: now.toISOString(),

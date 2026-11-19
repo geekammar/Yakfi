@@ -27,12 +27,16 @@
  * allowed to reach the UX-LAB-01C override service. The preview stays pure —
  * no DB, no provider, no network, no customer send.
  */
-import { renderCopyText } from "@/features/conversation-copy";
+import {
+  renderCopyText,
+  validateCopyCandidate,
+} from "@/features/conversation-copy";
 import type { CopyRenderFailureCode } from "@/features/conversation-copy/render";
 import type {
   CopyRegistryEntry,
   PlaceholderName,
 } from "@/features/conversation-copy/types";
+import type { CopyValidationFailure } from "@/features/conversation-copy/validation";
 import {
   getCopyLabEntryStateAction,
   publishCopyOverrideAction,
@@ -64,7 +68,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Drawer,
-  DrawerClose,
   DrawerContent,
   DrawerDescription,
   DrawerFooter,
@@ -86,7 +89,7 @@ import {
   UploadIcon,
   XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /** Arabic surfaces for the renderer's typed failure codes. */
 const RENDER_FAILURE_LABELS: Readonly<Record<CopyRenderFailureCode, string>> = {
@@ -99,6 +102,12 @@ const RENDER_FAILURE_LABELS: Readonly<Record<CopyRenderFailureCode, string>> = {
 
 const PROTECTED_BADGE = "محمي — للقراءة فقط";
 const MAX_COPY_LENGTH = 400;
+
+const PENDING_MUTATION_LABELS: Readonly<Record<MutationKind, string>> = {
+  publish: "جارٍ حفظ النشر والتحقق من القراءة الراجعة",
+  reset: "جارٍ إعادة التعيين والتحقق من القراءة الراجعة",
+  restore: "جارٍ الاسترجاع والتحقق من القراءة الراجعة",
+};
 
 /**
  * The service error shape the actions return, mirrored structurally so this
@@ -169,6 +178,11 @@ export function CopyLabDetail({
     readonly message: string;
   } | null>(null);
   const [confirmingReset, setConfirmingReset] = useState(false);
+  const [confirmingRestoreId, setConfirmingRestoreId] = useState<string | null>(
+    null,
+  );
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const mutationInFlightRef = useRef(false);
 
   const applyResult = useCallback(
     (result: GetCopyLabEntryStateResult) => {
@@ -205,7 +219,6 @@ export function CopyLabDetail({
     ok: boolean;
     source?: EffectiveCopySource;
   }> => {
-    setLoading(true);
     setError(null);
     try {
       const result = await getCopyLabEntryStateAction(entry.key);
@@ -218,19 +231,16 @@ export function CopyLabDetail({
             : undefined,
         };
       }
+      // A post-mutation readback failure must not destroy the editor state or
+      // the local draft. Keep the last good effective state and surface the
+      // failure through the mutation feedback instead.
       setLoadFailed(true);
-      setEffective(null);
-      setHistory(null);
       return { ok: false };
     } catch {
-      // Never let a thrown boundary call crash the drawer: keep the safe
-      // registry default and explain the state.
+      // Never let a thrown boundary call crash the drawer, and never discard
+      // edits the founder already typed because a readback failed.
       setLoadFailed(true);
-      setEffective(null);
-      setHistory(null);
       return { ok: false };
-    } finally {
-      setLoading(false);
     }
   }, [entry, applyResult]);
 
@@ -288,61 +298,146 @@ export function CopyLabDetail({
     [entry.key, draft, values],
   );
 
+  // Reuse the CANONICAL candidate validator for immediate feedback. Publishing
+  // is disabled while invalid, and the server boundary still validates again.
+  const validation = useMemo(
+    () => validateCopyCandidate(entry.key, draft),
+    [entry.key, draft],
+  );
+  const validationFailure = validation.ok ? null : validation;
+
   const editable = effective?.editable ?? !isProtected;
-  const unchanged = effective !== null && draft === effective.text;
+  // Dirty means "the local draft differs from the LOADED EFFECTIVE text",
+  // never "differs from the code default". When a valid published override is
+  // loaded, an untouched editor is clean even though it differs from the code
+  // default; after a failed readback the last loaded effective text remains the
+  // honest comparison baseline.
+  const hasUnappliedChanges = effective !== null && draft !== effective.text;
+  const unchanged = effective !== null && !hasUnappliedChanges;
   const persistenceDown = effective !== null && !effective.persistenceAvailable;
   const canMutate = editable && effective !== null && !persistenceDown;
+  const canPublish =
+    canMutate && hasUnappliedChanges && validation.ok && pending === null;
+
+  function clearConfirmations(): void {
+    setConfirmingReset(false);
+    setConfirmingRestoreId(null);
+    setConfirmingDiscard(false);
+  }
+
+  const mutationPending = pending !== null;
+
+  function requestClose(): void {
+    if (mutationPending || mutationInFlightRef.current) return;
+    clearConfirmations();
+    if (hasUnappliedChanges) {
+      setConfirmingDiscard(true);
+      setFeedback(null);
+      setError(null);
+      return;
+    }
+    setFeedback(null);
+    setError(null);
+    onOpenChange(false);
+  }
+
+  function discardAndClose(): void {
+    if (mutationPending || mutationInFlightRef.current) return;
+    clearConfirmations();
+    setFeedback(null);
+    setError(null);
+    onOpenChange(false);
+  }
+
+  function requestReset(): void {
+    if (mutationPending || mutationInFlightRef.current) return;
+    clearConfirmations();
+    setFeedback(null);
+    setError(null);
+    setConfirmingReset(true);
+  }
+
+  function requestRestore(historyId: string): void {
+    if (mutationPending || mutationInFlightRef.current) return;
+    clearConfirmations();
+    setFeedback(null);
+    setError(null);
+    if (hasUnappliedChanges) {
+      setConfirmingRestoreId(historyId);
+      return;
+    }
+    void run("restore", () => restoreCopyOverrideAction({ historyId }));
+  }
+
+  function confirmRestore(): void {
+    const historyId = confirmingRestoreId;
+    if (historyId === null || mutationPending || mutationInFlightRef.current) {
+      return;
+    }
+    clearConfirmations();
+    void run("restore", () => restoreCopyOverrideAction({ historyId }));
+  }
 
   async function run(
     kind: MutationKind,
     action: () => Promise<ActionResult>,
   ): Promise<void> {
+    // Ref guard closes the pre-render window where two rapid clicks could
+    // otherwise invoke two server mutations.
+    if (mutationInFlightRef.current) return;
+    mutationInFlightRef.current = true;
+    clearConfirmations();
     setPending(kind);
     setError(null);
     setFeedback(null);
-    let result: ActionResult;
     try {
-      // The action returns the service's typed envelope; a non-success is a
-      // real validation/persistence failure and is surfaced, never hidden.
-      result = await action();
-    } catch {
-      result = {
-        success: false,
-        error: {
-          code: "PERSISTENCE_FAILED",
-          message: "تعذر إكمال العملية الآن",
-        },
-      };
-    }
-    setPending(null);
-    if (result.success) {
-      setConfirmingReset(false);
-      const refreshResult = await refresh();
-      if (refreshResult.ok) {
-        setFeedback({
-          kind,
-          readbackSuccess: true,
-          message: getMutationFeedbackText({
-            kind,
-            key: entry.key,
-            readbackSuccess: true,
-            source: refreshResult.source,
-          }),
-        });
-      } else {
-        setFeedback({
-          kind,
-          readbackSuccess: false,
-          message: getMutationFeedbackText({
-            kind,
-            key: entry.key,
-            readbackSuccess: false,
-          }),
-        });
+      let result: ActionResult;
+      try {
+        // The action returns the service's typed envelope; a non-success is a
+        // real validation/persistence failure and is surfaced, never hidden.
+        result = await action();
+      } catch {
+        result = {
+          success: false,
+          error: {
+            code: "PERSISTENCE_FAILED",
+            message: "تعذر إكمال العملية الآن",
+          },
+        };
       }
-      return;
+      if (result.success) {
+        // Pending is intentionally kept through the readback: the editor stays
+        // read-only until the effective state is re-read (or the read fails).
+        const refreshResult = await refresh();
+        if (refreshResult.ok) {
+          setFeedback({
+            kind,
+            readbackSuccess: true,
+            message: getMutationFeedbackText({
+              kind,
+              key: entry.key,
+              readbackSuccess: true,
+              source: refreshResult.source,
+            }),
+          });
+        } else {
+          setFeedback({
+            kind,
+            readbackSuccess: false,
+            message: getMutationFeedbackText({
+              kind,
+              key: entry.key,
+              readbackSuccess: false,
+            }),
+          });
+        }
+        return;
+      }
+      setError(toMutationError(result.error));
+    } finally {
+      mutationInFlightRef.current = false;
+      setPending(null);
     }
-    setError(toMutationError(result.error));
   }
 
   return (
@@ -358,9 +453,19 @@ export function CopyLabDetail({
       open={open}
       onOpenChange={(nextOpen) => {
         if (!nextOpen) {
+          // Swipe/overlay/Escape go through here. Never close while a write is
+          // still running (a close/discard must not imply the write was
+          // cancelled), and never discard local edits silently.
+          if (mutationPending || mutationInFlightRef.current) return;
+          clearConfirmations();
+          if (hasUnappliedChanges) {
+            setConfirmingDiscard(true);
+            setFeedback(null);
+            setError(null);
+            return;
+          }
           setFeedback(null);
           setError(null);
-          setConfirmingReset(false);
         }
         onOpenChange(nextOpen);
       }}
@@ -390,23 +495,33 @@ export function CopyLabDetail({
 
           {loading ? (
             <LoadingState />
-          ) : loadFailed || effective === null ? (
+          ) : effective === null ? (
             <LoadFailedNotice />
           ) : (
             <>
               {/* ── EFFECTIVE STATE (product-first) ───────────────────── */}
               <EffectiveStateBlock entry={entry} state={effective} />
 
+              {loadFailed ? <ReadbackFailedNotice /> : null}
+
               {canMutate ? (
                 <CopyEditor
                   entry={entry}
                   draft={draft}
                   onDraftChange={(value) => {
+                    // Guard the handler as well as the DOM control: a programmatic
+                    // change during a mutation must never replace the in-flight
+                    // draft that applyResult is about to read back.
+                    if (mutationPending || mutationInFlightRef.current) return;
                     setDraft(value);
                     setFeedback(null);
                     setError(null);
+                    clearConfirmations();
                   }}
                   characters={[...draft].length}
+                  validationFailure={validationFailure}
+                  hasUnappliedChanges={hasUnappliedChanges}
+                  operationInProgress={mutationPending}
                 />
               ) : null}
             </>
@@ -447,10 +562,8 @@ export function CopyLabDetail({
           {canMutate ? (
             <HistorySection
               items={history}
-              disabled={pending !== null}
-              onRestore={(historyId) =>
-                run("restore", () => restoreCopyOverrideAction({ historyId }))
-              }
+              disabled={mutationPending}
+              onRestore={requestRestore}
             />
           ) : null}
 
@@ -459,6 +572,16 @@ export function CopyLabDetail({
         </div>
 
         <DrawerFooter className="space-y-2">
+          {mutationPending ? (
+            <p
+              role="status"
+              aria-live="polite"
+              className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 text-xs font-medium leading-relaxed text-amber-700 dark:text-amber-400"
+            >
+              {PENDING_MUTATION_LABELS[pending!]} — لا يمكن تعديل النص أو إغلاق
+              النافذة حتى تكتمل القراءة الراجعة.
+            </p>
+          ) : null}
           {error ? <MutationErrorAlert error={error} /> : null}
           {feedback !== null ? (
             <p
@@ -478,7 +601,7 @@ export function CopyLabDetail({
               <Button
                 type="button"
                 className="h-11 w-full"
-                disabled={pending !== null || unchanged}
+                disabled={!canPublish}
                 onClick={() =>
                   run("publish", () =>
                     publishCopyOverrideAction({ key: entry.key, text: draft }),
@@ -494,14 +617,18 @@ export function CopyLabDetail({
                   </>
                 )}
               </Button>
-              {unchanged ? (
+              {validationFailure ? (
+                <p className="text-destructive text-center text-xs">
+                  {COPY_VALIDATION_FAILURE_GUIDANCE[validationFailure.code]}
+                </p>
+              ) : unchanged ? (
                 <p className="text-muted-foreground text-center text-xs">
-                  النص الحالي مطابق للمخزن — لا يوجد تغيير للنشر.
+                  النص الحالي مطابق للنص الفعلي — لا يوجد تغيير للنشر.
                 </p>
               ) : null}
 
               {effective.publishedText !== null ? (
-                confirmingReset ? (
+                confirmingReset && !mutationPending ? (
                   <div className="space-y-2 rounded-xl border border-warning/30 bg-warning/5 p-2.5">
                     <p className="text-sm font-medium">
                       تأكيد إعادة التعيين في المخزن؟
@@ -509,6 +636,9 @@ export function CopyLabDetail({
                     <p className="text-muted-foreground text-xs leading-relaxed">
                       يُحذف التجاوز من مخزن المنصة ويعود النص المعتمد إلى
                       الافتراضي في الكود.
+                      {hasUnappliedChanges
+                        ? " وستُفقد تعديلاتك المحلية غير المطبقة على النص الفعلي."
+                        : ""}
                     </p>
                     <div className="flex gap-2">
                       <Button
@@ -547,11 +677,8 @@ export function CopyLabDetail({
                     type="button"
                     variant="outline"
                     className="h-11 w-full"
-                    disabled={pending !== null}
-                    onClick={() => {
-                      setFeedback(null);
-                      setConfirmingReset(true);
-                    }}
+                    disabled={mutationPending}
+                    onClick={requestReset}
                   >
                     <RotateCcwIcon aria-hidden className="size-4" />
                     إعادة التعيين للنص الافتراضي
@@ -561,9 +688,84 @@ export function CopyLabDetail({
             </div>
           ) : null}
 
-          <DrawerClose asChild>
-            <ButtonFullWidth label="إغلاق" />
-          </DrawerClose>
+          {confirmingRestoreId !== null && !mutationPending ? (
+            <div
+              role="alert"
+              className="space-y-2 rounded-xl border border-warning/30 bg-warning/5 p-3 text-start"
+            >
+              <p className="text-sm font-medium">
+                تأكيد استرجاع نسخة من السجل؟
+              </p>
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                سيستبدل التجاوز المنشور بهذه النسخة، وستُفقد تعديلاتك المحلية
+                غير المطبقة. هل تريد المتابعة؟
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="h-11 flex-1"
+                  disabled={mutationPending}
+                  onClick={confirmRestore}
+                >
+                  تأكيد الاسترجاع
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 flex-1"
+                  disabled={mutationPending}
+                  onClick={() => setConfirmingRestoreId(null)}
+                >
+                  إلغاء
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {confirmingDiscard && !mutationPending ? (
+            <div
+              role="alert"
+              className="space-y-2 rounded-xl border border-warning/30 bg-warning/5 p-3 text-start"
+            >
+              <p className="text-sm font-medium">
+                لديك تعديلات محلية غير مطبقة
+              </p>
+              <p className="text-muted-foreground text-xs leading-relaxed">
+                إغلاق النافذة سيتجاهل التعديلات المحلية غير المطبقة على الحالة
+                المعروضة، ولا يحذف ما نُشر بنجاح في المخزن. هل تريد المتابعة؟
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="h-11 flex-1"
+                  onClick={discardAndClose}
+                >
+                  تجاهل وإغلاق
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-11 flex-1"
+                  onClick={() => setConfirmingDiscard(false)}
+                >
+                  البقاء
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 w-full"
+              disabled={mutationPending}
+              onClick={requestClose}
+            >
+              <XIcon aria-hidden className="size-4" />
+              {mutationPending ? "جارٍ التنفيذ…" : "إغلاق"}
+            </Button>
+          )}
         </DrawerFooter>
       </DrawerContent>
     </Drawer>
@@ -581,6 +783,30 @@ function LoadingState() {
       <div className="bg-muted h-3 w-1/3 animate-pulse rounded" />
       <div className="bg-muted h-12 w-full animate-pulse rounded" />
       <p className="text-muted-foreground text-xs">يُقرأ النص من المخزن…</p>
+    </div>
+  );
+}
+
+/** A failed post-mutation readback: keep the last good effective state. */
+function ReadbackFailedNotice() {
+  return (
+    <div
+      role="alert"
+      className="flex items-start gap-2.5 rounded-xl border border-warning/30 bg-warning/5 p-3.5"
+    >
+      <CircleAlertIcon
+        aria-hidden
+        className="mt-0.5 size-4 shrink-0 text-warning-foreground"
+      />
+      <div className="space-y-1 text-sm">
+        <p className="font-medium text-warning-foreground">
+          تعذّر تحديث الحالة بعد آخر عملية
+        </p>
+        <p className="text-muted-foreground text-xs leading-relaxed">
+          تُعرض آخر حالة مقروءة، وتبقى تعديلاتك المحلية كما هي. أعد فتح النص
+          لاحقاً للتحقق من الحالة المخزنة.
+        </p>
+      </div>
     </div>
   );
 }
@@ -609,55 +835,100 @@ function LoadFailedNotice() {
   );
 }
 
-/** The explicit runtime coverage block showing whether the engine consumes this key. */
+/**
+ * Relevance and override connection are TWO separate facts. This block renders
+ * them as two independent sections so an operational key is never mislabeled
+ * "unconnected" (the wording IS produced) and an override is never implied to
+ * affect a path that does not read it.
+ */
 function RuntimeCoverageBlock({ entry }: { entry: CopyRegistryEntry }) {
   const coverage = getCopyRuntimeCoverage(entry.key, entry.classification);
+  const operational =
+    coverage.relevance === "CURRENT_OPERATIONAL_TEMPLATE" ||
+    coverage.relevance === "AUTHORITATIVE_DATA_PRESENTATION";
 
-  if (coverage.isConnected) {
-    return (
-      <div className="space-y-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-start">
+  return (
+    <div className="space-y-2">
+      <div
+        className={cn(
+          "space-y-1.5 rounded-xl border p-3 text-start",
+          operational
+            ? "border-sky-500/30 bg-sky-500/5"
+            : "border-muted bg-muted/20",
+        )}
+      >
         <div className="flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+          <span
+            className={cn(
+              "flex items-center gap-1.5 text-xs font-semibold",
+              operational
+                ? "text-sky-700 dark:text-sky-300"
+                : "text-muted-foreground",
+            )}
+          >
             <RadioIcon aria-hidden className="size-3.5" />
-            حالة الربط بمحرك المحادثة: متصل
+            صلة النص بالمسار التشغيلي الحالي
           </span>
           <Badge
             variant="outline"
-            className="border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-normal"
+            className={cn(
+              "text-xs font-normal",
+              operational
+                ? "border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300"
+                : "text-muted-foreground border-dashed",
+            )}
           >
-            {coverage.badgeLabel}
+            {coverage.relevanceLabel}
           </Badge>
         </div>
         <p className="text-xs leading-relaxed text-foreground">
-          {coverage.scopeSummary}
+          {coverage.relevanceSummary}
+        </p>
+        {coverage.runtimeNote ? (
+          <p className="rounded-lg bg-background/60 p-2 text-muted-foreground text-xs leading-relaxed">
+            {coverage.runtimeNote}
+          </p>
+        ) : null}
+      </div>
+
+      <div
+        className={cn(
+          "space-y-1.5 rounded-xl border p-3 text-start",
+          coverage.overrideConnection === "CONNECTED"
+            ? "border-emerald-500/30 bg-emerald-500/5"
+            : "border-muted bg-muted/20",
+        )}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span
+            className={cn(
+              "flex items-center gap-1.5 text-xs font-semibold",
+              coverage.overrideConnection === "CONNECTED"
+                ? "text-emerald-700 dark:text-emerald-400"
+                : "text-muted-foreground",
+            )}
+          >
+            ربط تجاوز المختبر بالمحرك
+          </span>
+          <Badge
+            variant="outline"
+            className={cn(
+              "text-xs font-normal",
+              coverage.overrideConnection === "CONNECTED"
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                : "text-muted-foreground border-dashed",
+            )}
+          >
+            {coverage.overrideConnectionLabel}
+          </Badge>
+        </div>
+        <p className="text-xs leading-relaxed text-foreground">
+          {coverage.overrideConnectionSummary}
         </p>
         <p className="text-muted-foreground text-xs leading-relaxed">
           {coverage.operationalNote}
         </p>
       </div>
-    );
-  }
-
-  return (
-    <div className="space-y-1.5 rounded-xl border border-muted bg-muted/20 p-3 text-start">
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
-          <RadioIcon aria-hidden className="size-3.5" />
-          حالة الربط بمحرك المحادثة: غير متصل بعد
-        </span>
-        <Badge
-          variant="outline"
-          className="text-muted-foreground border-dashed text-xs font-normal"
-        >
-          {coverage.badgeLabel}
-        </Badge>
-      </div>
-      <p className="text-xs leading-relaxed text-foreground">
-        {coverage.scopeSummary}
-      </p>
-      <p className="text-muted-foreground text-xs leading-relaxed">
-        {coverage.operationalNote}
-      </p>
     </div>
   );
 }
@@ -808,11 +1079,17 @@ function CopyEditor({
   draft,
   onDraftChange,
   characters,
+  validationFailure,
+  hasUnappliedChanges,
+  operationInProgress,
 }: {
   entry: CopyRegistryEntry;
   draft: string;
   onDraftChange: (value: string) => void;
   characters: number;
+  validationFailure: CopyValidationFailure | null;
+  hasUnappliedChanges: boolean;
+  operationInProgress: boolean;
 }) {
   const inputId = `copy-lab-editor-${entry.key}`;
   return (
@@ -836,9 +1113,34 @@ function CopyEditor({
         id={inputId}
         dir="auto"
         value={draft}
+        readOnly={operationInProgress}
+        aria-readonly={operationInProgress}
+        aria-busy={operationInProgress}
         onChange={(event) => onDraftChange(event.target.value)}
-        aria-describedby={`${inputId}-hint`}
+        aria-invalid={validationFailure !== null}
+        aria-describedby={`${inputId}-hint ${inputId}-dirty`}
       />
+      <p id={`${inputId}-dirty`} className="text-xs">
+        {operationInProgress ? (
+          <span role="status" className="text-amber-600 dark:text-amber-500">
+            العملية قيد التنفيذ والقراءة الراجعة لم تكتمل — المحرر للقراءة فقط
+            مؤقتاً.
+          </span>
+        ) : hasUnappliedChanges ? (
+          <span className="text-amber-600 dark:text-amber-500">
+            تعديلات محلية غير مطبقة على النص الفعلي.
+          </span>
+        ) : (
+          <span className="text-muted-foreground">
+            النص مطابق للنص الفعلي المحمّل.
+          </span>
+        )}
+      </p>
+      {validationFailure ? (
+        <p role="alert" className="text-destructive text-xs leading-relaxed">
+          {COPY_VALIDATION_FAILURE_GUIDANCE[validationFailure.code]}
+        </p>
+      ) : null}
       <p id={`${inputId}-hint`} className="text-muted-foreground text-xs">
         {entry.placeholders.length > 0
           ? "احتفظ بالحقول بين الأقواس كما هي — التحقق قبل النشر يرفض الحذف."
@@ -1240,25 +1542,5 @@ function ClassificationBadge({
     <Badge variant="outline" className="shrink-0">
       نص
     </Badge>
-  );
-}
-
-/**
- * The footer's full-width control. It forwards every prop it is given because
- * `DrawerClose asChild` (Radix Slot) merges its OWN props — the click handler
- * that closes the drawer, plus `type="button"` — onto THIS element. A
- * destructured `{ label }` signature silently drops them: the rendered button
- * then carries no click handler at all, so the Close control is inert (B3,
- * UX-LAB-01D-P1 — the exact "Close does not respond" symptom).
- */
-function ButtonFullWidth({
-  label,
-  ...props
-}: { label: string } & React.ComponentProps<typeof Button>) {
-  return (
-    <Button className="h-11 w-full" variant="outline" {...props}>
-      <XIcon aria-hidden className="size-4" />
-      {label}
-    </Button>
   );
 }

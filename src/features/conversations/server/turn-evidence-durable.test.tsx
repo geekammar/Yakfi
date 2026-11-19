@@ -209,21 +209,46 @@ async function runTurn(
     repo?: EvidenceRepo;
     requiredSemanticCapability?: "structured_turn" | null;
     trafficPool?: ConversationEngineDeps["trafficPool"];
+    execution?: {
+      response: AiResponse | null;
+      providerName?: string;
+      telemetry?: AiTelemetry | null;
+      policyUnavailable?: boolean;
+      error?: unknown;
+    };
   } = {},
 ): Promise<TurnRun> {
   let aiCalls = 0;
   let sends = 0;
   const emitted: TurnEvidence[] = [];
   const ai = {
-    providerName: "fake-ai",
+    providerName: options.execution?.providerName ?? "fake-ai",
     async respond(): Promise<AiResponse> {
       aiCalls += 1;
       if (!options.aiResponse) throw new Error("simulated provider failure");
       return options.aiResponse;
     },
-    ...(options.telemetryPresent === false
-      ? {}
-      : { getLastTelemetry: () => options.telemetry ?? null }),
+    ...(options.execution
+      ? {
+          async respondWithExecution() {
+            aiCalls += 1;
+            return {
+              response: options.execution!.response,
+              providerName: options.execution!.providerName ?? "fake-ai",
+              telemetry: options.execution!.telemetry ?? null,
+              policyUnavailable:
+                options.execution!.policyUnavailable ?? false,
+              error:
+                options.execution!.error ??
+                (options.execution!.response
+                  ? null
+                  : new Error("simulated execution failure")),
+            };
+          },
+        }
+      : options.telemetryPresent === false
+        ? {}
+        : { getLastTelemetry: () => options.telemetry ?? null }),
   } as unknown as ConversationEngineDeps["ai"];
   const transport = {
     providerName: "fake-transport",
@@ -389,6 +414,115 @@ describe("durable turn evidence (disposable PostgreSQL)", () => {
     expect(reconciliation.evidence.cost.invoiceReconciliation).toBe(
       "NOT_PERFORMED",
     );
+  });
+
+  it("records actual-call evidence from the PR95 request-scoped result", async () => {
+    const fixture = await createFixture("منشأة الحدث الفعلي");
+    const cost = 0.000321;
+    const telemetry = buildTelemetry(
+      [
+        {
+          provider: "openrouter",
+          model: "model-actual",
+          status: "SUCCESS",
+          costUsd: cost,
+          inputTokens: 21,
+          outputTokens: 8,
+        },
+      ],
+      {
+        totalCostUsd: cost,
+        knownCostSubtotalUsd: cost,
+        costCompleteness: "COMPLETE",
+      },
+    );
+    const run = await runTurn(fixture, {
+      execution: {
+        response: SAFE_HANDOFF,
+        providerName: "openrouter",
+        telemetry,
+      },
+    });
+
+    const row = await findEvidence(
+      fixture.businessId,
+      run.result.customerMessageId,
+    );
+    expect(run.result.observability?.policyUnavailable).not.toBe(true);
+    expect(run.result.observability?.providerAttempts).toBe(1);
+    expect(run.result.observability?.modelCallCount).toBe(1);
+    expect(row?.executionEvidence).toBe("RECORDED");
+    expect(row?.provider).toBe("openrouter");
+    expect(row?.attempts).toHaveLength(1);
+    expect(row?.attempts[0]?.provider).toBe("openrouter");
+    expect(row?.attempts[0]?.costUsd).toBe(cost);
+    expect(row?.totalCostUsd).toBe(cost);
+    expect(row?.costCompleteness).toBe("COMPLETE");
+    expect(
+      await db.usageRecord.count({
+        where: {
+          businessId: fixture.businessId,
+          kind: "AI_TURN",
+          messageId: run.result.customerMessageId,
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it("records policy-unavailable as proven no-call, not unknown execution", async () => {
+    const fixture = await createFixture("منشأة تعذر السياسة");
+    const run = await runTurn(fixture, {
+      execution: {
+        response: null,
+        providerName: "policy-unavailable",
+        telemetry: null,
+        policyUnavailable: true,
+        error: new Error("AI_POLICY_UNAVAILABLE"),
+      },
+    });
+
+    expect(run.result.assistantAction).toBe("AI_HANDOFF");
+    expect(run.result.handoffCause).toBe("AI_FAILURE");
+    expect(run.result.observability?.policyUnavailable).toBe(true);
+    expect(run.result.observability?.routingDecision).toBe("NONE");
+    expect(run.result.observability?.providerAttempts).toBe(0);
+    expect(run.result.observability?.modelCallCount).toBe(0);
+    expect(run.result.observability?.providerStatus).toBe("NOT_CALLED");
+
+    const row = await findEvidence(
+      fixture.businessId,
+      run.result.customerMessageId,
+    );
+    expect(row?.executionEvidence).toBe("PROVEN_NO_CALL");
+    expect(row?.attempts).toHaveLength(0);
+    expect(row?.provider).toBe("policy-unavailable");
+    expect(row?.routingDecision).toBe("NONE");
+    expect(row?.providerStatus).toBe("NOT_CALLED");
+    expect(row?.totalCostUsd).toBeNull();
+    expect(row?.knownCostSubtotalUsd).toBeNull();
+    expect(row?.costCompleteness).toBeNull();
+    expect(
+      await db.usageRecord.count({
+        where: {
+          businessId: fixture.businessId,
+          kind: "AI_TURN",
+          messageId: run.result.customerMessageId,
+        },
+      }),
+    ).toBe(0);
+
+    const reconciliation = await turnEvidenceRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...windowForNow(),
+    });
+    expect(reconciliation.evidence.executionEvidence.provenNoCall).toBe(1);
+    expect(reconciliation.evidence.executionEvidence.unavailable).toBe(0);
+    expect(reconciliation.usage.evidenceWithoutAiTurn.expectedNoCall).toBe(1);
+    expect(reconciliation.evidence.cost.scopedWindowCostStatus).toBe(
+      "COMPLETE",
+    );
+    expect(reconciliation.evidence.cost.scopedWindowTotalCostUsd).toBe(0);
   });
 
   it("persists multiple fallback attempts with stable identities and the full total", async () => {

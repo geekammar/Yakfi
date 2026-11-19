@@ -176,10 +176,13 @@ billing ledger or an invoice system.
   `SERVING`. Shadow evaluations are a side-channel and never become serving
   attempts or paid turn rows. Reconciliation REQUIRES one explicit pool;
   TEST/SHADOW never inflate SERVING evidence/cost metrics.
-- **Request-scoped telemetry:** the production policy-backed assistant returns
-  response, provider identity and telemetry from the same request-scoped
-  adapter instance. No module-level "last telemetry" value is used for
-  accounting, including failure paths.
+- **Request-scoped execution boundary:** the production policy-backed
+  assistant returns response, provider identity, telemetry and the explicit
+  `policyUnavailable` marker from the same request-scoped invocation through
+  `respondWithExecution`. No module-level "last telemetry" value or second
+  execution-accounting path is used, including failure paths. A policy
+  no-call is evidence `PROVEN_NO_CALL`; missing telemetry without that explicit
+  marker remains `UNAVAILABLE`.
 - **Failure isolation:** persistence is awaited in the existing request
   lifecycle AFTER the customer outcome is complete. A storage failure is
   caught, emits a sanitized `flowpilot.turn.evidence.durable.failed` signal,

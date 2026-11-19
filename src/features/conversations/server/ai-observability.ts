@@ -309,6 +309,12 @@ export type TurnObservability = {
   readonly providerAttempts?: number;
   /** Provider outcome for the turn; `NOT_CALLED` for a deterministic turn. */
   readonly providerStatus?: "SUCCESS" | "FAILURE" | "NOT_CALLED";
+  /**
+   * Explicit request-scoped proof that policy resolution failed before any
+   * provider/JEV dispatch. It distinguishes a PROVEN policy no-call from
+   * unknown execution evidence and is never inferred from a provider name.
+   */
+  readonly policyUnavailable?: boolean;
   /** Whether `parseAiResponse` accepted the provider output. */
   readonly parseSuccess?: boolean;
   /**
@@ -428,6 +434,8 @@ export type BuildTurnObservabilityInput = {
   providerAttempts?: number | null;
   /** Provider outcome for the turn (PROMPT-AI-OPS-22). */
   providerStatus?: "SUCCESS" | "FAILURE" | "NOT_CALLED" | null;
+  /** Explicit request-scoped policy no-call marker (PR #95 boundary). */
+  policyUnavailable?: boolean | null;
   /** Whether `parseAiResponse` accepted the provider output. */
   parseSuccess?: boolean | null;
   /**
@@ -530,6 +538,7 @@ export function buildTurnObservability(
       ? { providerAttempts: input.providerAttempts }
       : {}),
     ...(input.providerStatus ? { providerStatus: input.providerStatus } : {}),
+    ...(input.policyUnavailable ? { policyUnavailable: true } : {}),
     ...(input.parseSuccess !== undefined && input.parseSuccess !== null
       ? { parseSuccess: input.parseSuccess }
       : {}),

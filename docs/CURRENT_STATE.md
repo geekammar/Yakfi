@@ -1,71 +1,184 @@
 # FlowPilot — Current State
 
-> **Tier 0 orientation snapshot — as of 16 November 2026.** Read with
-> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0 is the current
-> release/evidence baseline; 0A/0B retain the prior pricing/attention and
-> live-refresh candidate history. Preserved evidence follows: historical
-> `main` context, the integration/R5 record, the original R6 failure, and the
-> Y83 delivery failure. This file is not a substitute for code, the canonical
-> topic docs or `docs/BUILD_STATE.md`. No live deployment, provider probe,
-> migration, webhook move or paid call was performed for this snapshot.
+> **Tier 0 orientation snapshot — as of 19 November 2026.** Read with
+> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0D records the
+> merged PR #95 request-scoped policy-failure boundary and the read-only Render
+> observation. Section 0E records the refreshed Draft PR #88 durable-evidence
+> candidate. Sections 0/00/0A/0B and 1–9 retain prior release, R5, R6, Y83 and
+> QA249/QA250 evidence unchanged. The Render app is technically ready;
+> Telegram cutover and live product acceptance have not been performed.
 
-## 0. Current release and acceptance evidence — 16 November 2026
+## 0D. PR #95 merged: request-scoped policy fail-closed — 19 November 2026
 
-- **Current `main` / Production baseline:** `0.79.14`, merge commit
-  `ef3a5d808032155a3ce21364515e62cb2192918b` (PR #87). Refs were verified
-  before branching; no movement was found.
-- **PR #87 is merged.** It completed the prior evidence branch: real-action
-  appointment tenant isolation, NO_SHOW policy coverage, and required-CI
-  wiring for the existing Copy Lab/turn-evidence checks. Its final CI result
-  is recorded on that PR; this snapshot does not rewrite it.
-- **Current candidate:** branch `feat/durable-turn-usage-cost-evidence`,
-  package `0.79.15`, draft PR #88 from the exact `main` merge commit. Scope is
-  the bounded durable usage/cost evidence addition plus the reviewed PR88
-  repair: request-scoped provider telemetry (no module-level last-request
-  state), explicit pool-scoped reports, exact full-window reconciliation with
-  truthful link/truncation semantics, and explicit unknown-execution vs
-  proven-no-call/dispatch evidence. The existing cost engine and attempt
-  projection are reused.
-- **Cost/evidence boundary:** persisted costs are the existing
-  provider-reported USD values (`DOUBLE PRECISION`, no integer-micro
-  rounding). Null/unknown, real zero, proven prevention and not-applicable
-  remain distinct; a mixed turn is `PARTIAL` with `totalCostUsd = null`.
-  Missing telemetry is `UNAVAILABLE` execution, never a proven no-call; missing
-  HTTP counts are `UNKNOWN`, never `DISPATCHED`. Provider-reported cost is NOT
-  invoice reconciliation. Historical `AI_TURN` rows without a `messageId`
-  remain explicitly unresolved; no historical rate, invoice or cost is
-  backfilled.
-- **Pool and lifecycle:** `trafficPool` is explicit (`SERVING` from production
-  entry points, `TEST` from the dedicated test ingress); reports require one
-  pool and test/shadow traffic never inflates serving metrics. Window usage
-  counts are labelled NOT pool totals because `usage_records` has no pool
-  column. Durable persistence is awaited inside the existing request lifecycle
-  AFTER the reply was persisted + delivered. A storage failure emits only a
-  sanitized `durable.failed` signal and cannot resend, rerun AI, recreate a
-  booking or change the customer outcome; the existing fail-open log/OTLP
-  emission is preserved.
-- **CI wiring:** `check:request-scoped-usage` and
-  `check:durable-turn-evidence` run in the offline validate job;
-  `test:turn-evidence-durable-db` runs only after disposable PostgreSQL
-  preparation and `db:deploy`. Tests cover production-wrapper interleaving,
-  successful/fallback/partial/zero/unknown/proven-no-call/unavailable-
-  execution, unknown/prevented dispatch, replay, concurrency, same-tenant
-  mixed pool, exact full-window vs bounded page, window edges, real missing
-  links, tenant/conflicting identity, persistence failure, precision/
-  nullability, redaction and payload bounds. Automatic PR tests never receive
+- **PR #95 is merged:** merge commit
+  `9187655ae9909326d8243eccffc11c2f160bcabb`, package `0.79.21`, merged at
+  `2026-11-19T23:30:54Z`; `origin/main` is that merge. The old PR #95 branch
+  head was `26a5e6c`.
+- **Merged behavior:** policy read/persistence/invalid failure returns a
+  bounded `policy-unavailable` assistant that enters the existing
+  `AI_FAILURE` / `NEED_HUMAN` path with zero provider/JEV calls, no booking
+  mutation and no lexical fallback. The production policy wrapper is
+  stateless; `ConversationAi.respondWithExecution` returns response, provider,
+  telemetry and an explicit `policyUnavailable` marker from the same
+  invocation. Valid-policy, real provider-failure, `/start` and valid callback
+  behavior are preserved.
+- **Read-only Render observation at `2026-11-19T23:31Z`:** `/api/health/live`
+  and `/api/health` returned HTTP `200` with version `0.79.20`, exact commit
+  `fdf8e56dad5c7bc4e5ff1f35968dd61b4ade5a6b` (PR #94), environment
+  `production`, `deploymentReady=true`, `database=connected`,
+  `missingEnvVars=[]`. The `0.79.21` deployment was **pending** at that
+  observation; it was not triggered manually. This is readiness evidence, not
+  live product acceptance.
+- **Not claimed:** no deploy, production DB access, migration,
+  Telegram/customer send or paid AI call.
+
+## 0E. Refreshed PR #88 durable evidence candidate — 19 November 2026
+
+- **Branch/PR preserved:** existing branch
+  `feat/durable-turn-usage-cost-evidence` and Draft PR #88 remain the delivery
+  vehicle. Current `main` (`9187655`, `0.79.21`) was merged in
+  non-destructively; there was no reset, force-push or history rewrite.
+  Package version is `0.79.22`.
+- **One execution boundary:** PR88's earlier `respondTurn` wrapper and
+  module-level last-telemetry plumbing were removed. Routing, physical/logical
+  counters, usage rows, provider attribution and durable evidence now consume
+  the merged PR #95 `respondWithExecution` result. There is no second
+  execution-accounting path and no shared "last provider/telemetry" state.
+- **Policy no-call vs unknown execution:** the explicit request-scoped
+  `policyUnavailable` marker is projected into turn evidence and maps to
+  `executionEvidence=PROVEN_NO_CALL` with zero attempts. Missing telemetry
+  without that marker remains `UNAVAILABLE`; it is never presented as a
+  proven no-call. Deterministic/JEV/deferred proofs and valid-policy provider
+  failures keep their existing meaning.
+- **Bounded economics preserved:** additive `turn_evidence_records` /
+  `turn_evidence_attempts`; explicit `trafficPool` (`SERVING` production
+  routes, `TEST` isolated test ingress); read-only exact full-window
+  reconciliation; separate confirmed HTTP, unknown dispatch and prevented
+  counts; provider-reported cost and attempt identity copied from the existing
+  projection; null/unknown stays distinct from a real zero or complete total.
+  No historical backfill, second cost engine, billing or entitlement change.
+- **Migrations:** `20261116120000_durable_turn_evidence` and
+  `20261116210000_durable_turn_evidence_execution_scope` are additive and
+  remain unapplied. Validation runs only against the disposable PostgreSQL CI
+  service; no production/runtime database command is authorized.
+- **Limits:** no merge, deploy, production migration, paid AI call or
+  Telegram/customer send. Crash-before-turn-completion, invoice reconciliation
+  and a global enforceable spend cap remain open. Required CI on the final PR
+  HEAD is the verification authority.
+
+## 0C. Booking/delivery/transcript repair candidate — 19 November 2026
+
+- **Baseline:** verified `main` `9e887dfccbaa2f990861abc75518f78d1c9fb223`
+  (`0.79.18`, PR #92 merged). PR #88 and Rabet are untouched.
+- **Draft candidate `0.79.19` (one PR):** expired inherited booking dates are
+  no longer resumed into a new unstated-date request (business-local Cairo
+  boundary); explicit current-turn past dates are still rejected; outbound
+  transport diagnostics now separate network uncertainty, HTTP rejection/rate
+  limit and malformed payload, and a failed assistant delivery is shown
+  truthfully from the existing OUTBOUND_MESSAGE usage evidence; accepted staff
+  replies return the persisted `Message.id` (provider id kept separate), so a
+  status recheck or poll can no longer create a second identical bubble.
+- **Not claimed:** the exact 19 November historical delivery/provider cause is
+  unavailable in retained evidence; no live retest, deploy, migration, Telegram
+  send or paid AI call was performed. Required CI evidence is on the PR HEAD.
+
+## 0. Live Render readiness & configuration alignment — 18 November 2026
+
+- **Current `main` baseline:** `0.79.17`, merge commit
+  `e1851deec1406d690807440639761152d3d029e1` (PR91 merged and auto-deployed
+  18 November 2026). PR #88 (`74f6594a...`) remains open, Draft, and untouched.
+- **Technically ready Render app:** existing service `Yakfi`
+  (`srv-dbv0igutlv9c73fe4990`) in `My Workspace`
+  (`tea-db9st3gm7kps73ek9op0`), region `ohio`, Starter `0.5c-512mb`, URL
+  `https://yakfi.onrender.com`. Live deployment
+  `dep-dbv2akqvcj2c73c0a440` (trigger `new_commit`) runs `e1851de` / `0.79.17`;
+  `/api/health/live` and `/api/health` return HTTP `200` with
+  `deploymentReady=true`, `database=connected`, and `missingEnvVars=[]`.
+- **Completed configuration:** direct transfer of `DATABASE_URL` +
+  `CREDENTIAL_MASTER_KEY` from GitHub Actions secrets via a read-only dry-run
+  then apply; `BETTER_AUTH_SECRET` and `OPENROUTER_API_KEY` confirmed present by
+  name only. Render auto-deploy is On Commit (`autoDeployTrigger=commit`) for
+  branch `main`; PR91 aligned `render.yaml` (`Yakfi`, `commit`) on `main`.
+  The service is managed through the Render Dashboard/API; this Blueprint has
+  **not** been imported or applied, and matching names do not prove Blueprint
+  ownership or adoption.
+- **Read-only cutover evidence before the new tool:** selected DB/bot credential
+  and fixed business/connection/bot identity verified as `HEALTHY_LOCAL_KEY`
+  with 30 migrations `UP_TO_DATE`; Render readiness is HTTP `200`. Legacy
+  `production-telegram-repair` and `cutover-main-runtime-*` paths are not
+  suitable for the Render/selected-DB target, so `getWebhookInfo` and the signed
+  Render credential-readiness proof were not previously obtained.
+- **Cutover tooling candidate (`feat/yakfi-render-telegram-cutover`,
+  `0.79.18`):** adds manual-only
+  `.github/workflows/render-telegram-cutover.yml` +
+  `scripts/render-telegram-cutover.ts` for a read-only `preflight` (default) and
+  an explicit `apply`. The tool pins the Render destination, requires exact
+  checkout/deployed SHA/version and fixed workspace/service/Business/Connection/
+  Bot identity, uses the selected `TEST_DATABASE_URL` +
+  `CREDENTIAL_MASTER_KEY` path plus existing `RENDER_API_KEY` for fixed
+  service/workspace/region verification, calls `getWebhookInfo`, verifies signed
+  Render runtime readiness, requires `pending_update_count === 0` for apply,
+  never uses `drop_pending_updates`, and reports partial failures without blind
+  retry. Already-at-destination reports Telegram-observed vs desired
+  `allowed_updates` separately; a URL match with any extra/missing set is
+  blocked, not treated as exact readiness. An explicit `operation=reconcile`
+  is the guarded in-place secret reset/corrective path; it is never automatic.
+  When exact `allowedUpdates` is supplied, post-apply verification checks the
+  observed set exactly and returns a truthful partial failure on mismatch.
+  Raw `allowed_updates` is validated before normalization; missing,
+  non-array, null, mixed-type or empty-string observations block preflight as
+  `OBSERVED_ALLOWED_UPDATES_MALFORMED` and cannot be exact, and the switch
+  refuses them as `MALFORMED_ALLOWED_UPDATES` when exact updates are required.
+  Legacy callers that omit `allowedUpdates` keep the prior merge/include
+  behavior. Partial apply/reconcile results report post-operation observed
+  settings only when Telegram was actually inspected; otherwise they remain
+  `UNKNOWN`, while desired settings stay separate.
+  CI run `44520995005` passed the code HEAD `8c4afbf` with **35/35** cutover
+  checks and 27/27 Render migration checks. Manual `workflow_dispatch` from the candidate
+  branch is unavailable until the workflow exists on `main` (GitHub returns
+  404); no live read-only preflight was executed from the candidate and no
+  local secret workaround was used. No live webhook change was made.
+- **Not done / not verified:** live `getWebhookInfo`/pending backlog via the new
+  workflow (candidate is not on `main` until merge), Telegram webhook cutover,
+  Telegram messages, live product acceptance, and workload capacity testing.
+  The reviewer previously observed approximately **272–281 MiB of a 512 MiB
+  limit over about 46 minutes**; this is a historical idle baseline, not proof
+  of workload capacity. The Render Blueprint ownership/adoption remains
+  unestablished. PR88 remains separate. Historical R5/R6/Y83 and QA249/QA250
+  evidence is unchanged.
+
+## 00. Prior acceptance evidence completion — 16 November 2026
+
+- **Current `main` / Production baseline:** `0.79.13`, merge commit
+  `472e9aa9571c15b3f091741012b06cbe0d66e576` (PR #86). Refs were verified
+  before branching; no difference was found.
+- **PR #86 is merged.** Its final CI run `43863159151` passed both required
+  jobs (`PR Quality Gates & Regression Suite`, `Automated Browser UX QA`) on
+  HEAD `c45492b`; the merge produced `472e9aa` / tag `v0.79.13`.
+- **Current candidate:** branch `test/acceptance-evidence-ci`, package
+  `0.79.14`, draft PR from the exact main merge commit. Scope is evidence
+  completion only: real-action appointment tenant isolation, NO_SHOW policy
+  coverage, and required-CI wiring for the existing Copy Lab/turn-evidence
+  checks. No booking policy, schema, migration or runtime change is included.
+- **Real-DB versus controlled boundary:** the new appointment-action test uses
+  REAL exported actions, repositories and PostgreSQL writes for two
+  businesses. Only the Next.js `requireUser()` module seam is controlled; the
+  session→persisted-user→tenant resolution still uses the REAL database user
+  lookup. This is not claimed as full browser/cookie Better Auth coverage.
+- **CI wiring and concurrency:** `check:copy-lab-db` and
+  `test:appointment-actions-db` run only after disposable PostgreSQL
+  preparation; `test:copy-lab` and `check:turn-evidence` run in the offline
+  validate job. `pr-validation.yml` cancels superseded runs per PR/ref;
+  `production-release.yml` and `test-db-migrate.yml` are serialized with
+  cancellation disabled. Limits: different PRs/branches may run concurrently,
+  there is no cross-workflow lock, and cancellation is not a transactional
+  rollback. Automatic PR tests use only the job-local database, never
   Production/Neon runtime credentials.
-- **Production observation (separate):** at 2026-11-16T21:12Z both the
-  Production alias and the direct Production deployment returned HTTP 402 /
-  `DEPLOYMENT_DISABLED`. PR #88 was not merged and is not attributed as the
-  cause. Do not change deployment/account/billing settings from this task;
-  live acceptance is **BLOCKED** while the condition persists.
-- **Still open:** real-device/operator mobile acceptance, a global enforceable
-  spend cap, provider-invoice reconciliation (explicitly `NOT_PERFORMED`),
-  crash-before-turn-completion attempts, and production application of the new
-  migrations (operator-authorized, never automatic). Playwright mobile
-  viewports remain automated evidence, not operator mobile acceptance.
-  Historical QA outcomes (including QA249/QA250 failures and later passes),
-  R5 PASS, R6 FAIL and Y83 FAIL remain preserved.
+- **Still open:** real-device/operator mobile acceptance, and persisted
+  usage/cost reconciliation. `check:turn-evidence` is offline/in-memory; it
+  does not prove reconciliation against stored `usage_records`, complete cost
+  accounting, or a global spend cap. Playwright mobile viewports are automated
+  evidence, not operator mobile acceptance.
 
 ## 0A. Historical pricing/attention repair candidate — 15 November 2026
 

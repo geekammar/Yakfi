@@ -688,24 +688,34 @@ async function main(): Promise<void> {
     );
   }
   {
-    const effective: import("../src/lib/validation/platform").EffectiveAiPolicy =
-      {
-        primaryProvider: "openrouter",
-        primaryModel: "m1",
-        secondary: null,
-      };
-    // createPolicyBackedAi falls back to deterministic when policy read fails
+    let fetchCalls = 0;
+    // createPolicyBackedAi must NOT fall back to the lexical assistant when
+    // the policy read fails; the bounded unavailable assistant is the only
+    // safe outcome and it must make zero provider calls.
     const ai = await factory.createPolicyBackedAi({
       getEnvVar,
-      fetchImpl: mockFetchOnce(200, openAiEnvelope(validAiResponseJson())),
+      fetchImpl: (async () => {
+        fetchCalls += 1;
+        return new Response(
+          JSON.stringify(openAiEnvelope(validAiResponseJson())),
+          { status: 200 },
+        );
+      }) as unknown as typeof fetch,
       getAiPolicyImpl: (async () => {
         throw new Error("db down");
       }) as never,
     });
-    void effective;
+    let rejected = false;
+    try {
+      await ai.respond(baseRequest);
+    } catch {
+      rejected = true;
+    }
     check(
-      "09c فشل قراءة السياسة → deterministic fallback (المحرك يبقى آمناً)",
-      ai.providerName === "deterministic",
+      "09c فشل قراءة السياسة → مساعد unavailable مغلق بلا استدعاء مزوّد (لا fallback معجمي)",
+      ai.providerName === factory.POLICY_UNAVAILABLE_AI_PROVIDER &&
+        rejected &&
+        fetchCalls === 0,
     );
   }
 

@@ -22,6 +22,7 @@ import {
 } from "@/features/conversations/lib/storage";
 import type {
   ConversationDetailData,
+  ConversationRefreshData,
   StaffReplyActionResult,
   StaffReplyStatusActionResult,
 } from "@/features/conversations/types";
@@ -149,6 +150,47 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
     const phone = header?.querySelector('p[dir="ltr"]');
     expect(phone).not.toBeNull();
     expect(phone?.textContent).toBe(mockData.customer.phone);
+  });
+
+  it("U02b: A failed outbound assistant message is never presented as delivered", async () => {
+    const root = createRoot(container);
+    const dataWithDelivery: ConversationDetailData = {
+      ...mockData,
+      messages: [
+        ...mockData.messages,
+        {
+          id: "msg-ai-failed",
+          senderType: "AI",
+          content: "رد لم يتم تأكيد وصوله",
+          deliveryStatus: "FAILURE",
+          createdAt: "2026-10-27T10:02:00Z",
+        },
+        {
+          id: "msg-ai-delivered",
+          senderType: "AI",
+          content: "رد تم إرساله",
+          deliveryStatus: "SUCCESS",
+          createdAt: "2026-10-27T10:03:00Z",
+        },
+      ],
+    };
+
+    await act(async () => {
+      root.render(<ConversationDetail data={dataWithDelivery} />);
+    });
+
+    const failedIndicators = container.querySelectorAll(
+      '[role="status"][aria-label="لم يتم تأكيد وصول الرد إلى العميل"]',
+    );
+    expect(failedIndicators).toHaveLength(1);
+    expect(failedIndicators[0]?.textContent).toContain(
+      "لم يتم تأكيد وصول الرد",
+    );
+    expect(
+      container.querySelector(
+        '[aria-label="لم يتم تأكيد وصول الرد إلى العميل"]',
+      )?.parentElement?.parentElement?.textContent,
+    ).toContain("رد لم يتم تأكيد وصوله");
   });
 
   it("U03 & U04: Renders conversation status and actual assignee/responder badge", async () => {
@@ -1073,6 +1115,110 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         'div[role="status"][aria-label="تأكيد إرسال الرد"]',
       );
       expect(acceptedStatus).not.toBeNull();
+    });
+
+    it("UI status recheck + poll race: accepted attempt reconciles by persisted Message.id and never duplicates the bubble", async () => {
+      const attemptId = "attempt-status-identity-789";
+      const persistedId = "staff-row-persisted-789";
+      const content = "رد فريق مؤكد من الخادم";
+
+      setStoredReplyAttempt(testBiz, userA, mockData.id, {
+        attemptId,
+        content,
+        status: "unknown",
+        timestamp: Date.now(),
+      });
+
+      const dataWithOptimistic: ConversationDetailData = {
+        ...mockData,
+        businessId: testBiz,
+        currentUserId: userA,
+        messages: [
+          ...mockData.messages,
+          {
+            id: attemptId,
+            senderType: "STAFF",
+            content,
+            createdAt: "2026-10-27T10:10:00Z",
+          },
+        ],
+      };
+
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(<ConversationDetail data={dataWithOptimistic} />);
+        await new Promise((r) => setTimeout(r, 10));
+      });
+
+      const countBubbles = () =>
+        Array.from(container.querySelectorAll('[role="log"] p')).filter(
+          (paragraph) => paragraph.textContent === content,
+        ).length;
+      expect(countBubbles()).toBe(1);
+
+      let resolveRetry: (
+        value: StaffReplyStatusActionResult,
+      ) => void = () => {};
+      const retryPromise = new Promise<StaffReplyStatusActionResult>((res) => {
+        resolveRetry = res;
+      });
+      checkStaffReplyStatus.mockReturnValue(retryPromise);
+
+      const retryBtn = Array.from(container.querySelectorAll("button")).find(
+        (b) => b.textContent?.includes("إعادة التحقق من الإرسال"),
+      );
+      expect(retryBtn).not.toBeNull();
+      await act(async () => {
+        retryBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+
+      await act(async () => {
+        resolveRetry({
+          success: true,
+          status: "accepted",
+          messageId: persistedId,
+          message: "تم تأكيد قبول الإرسال من مزود الخدمة",
+        });
+        await retryPromise;
+      });
+
+      // The confirmation replaced the optimistic identity locally.
+      expect(countBubbles()).toBe(1);
+
+      // A subsequent authoritative poll contains the SAME persisted row.
+      const snapshot: ConversationRefreshData = {
+        id: mockData.id,
+        status: "NEED_HUMAN",
+        aiSummary: mockData.aiSummary,
+        assignedUser: null,
+        attentionReason: null,
+        attentionCause: null,
+        messages: [
+          ...mockData.messages,
+          {
+            id: persistedId,
+            senderType: "STAFF",
+            content,
+            createdAt: "2026-10-27T10:10:00Z",
+          },
+        ],
+        appointments: mockData.appointments,
+        team: mockData.team,
+      };
+      refreshConversationDetail.mockResolvedValue({
+        success: true,
+        data: snapshot,
+      });
+
+      await act(async () => {
+        window.dispatchEvent(new Event("focus"));
+        await new Promise((r) => setTimeout(r, 20));
+      });
+
+      expect(countBubbles()).toBe(1);
+      expect(getStoredReplyAttempt(testBiz, userA, mockData.id)).toBeNull();
+
+      await act(async () => root.unmount());
     });
 
     it("UI submission path: Normal submit click on unresolved attempt does not redispatch and requires distinct action for new send", async () => {

@@ -101,7 +101,9 @@ collect evidence.
   only vendor seams. Both provider decisions have since been resolved and
   implemented: WhatsApp = **Meta Cloud API** (DECISIONS #42, live) and the
   AI runtime = **platform policy-backed adapters** openrouter/agentrouter/atria
-  with deterministic fallback (DECISIONS #44). The Business-side WhatsApp
+  (DECISIONS #44); an unreadable/invalid policy fails closed through the
+  existing `AI_FAILURE` / `NEED_HUMAN` path, never a lexical fallback
+  (DECISIONS #114). The Business-side WhatsApp
   connection onboarding surface is `/settings/whatsapp` (DECISIONS #47).
 
 ### 9. Appointments

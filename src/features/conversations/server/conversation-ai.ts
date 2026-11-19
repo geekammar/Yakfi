@@ -48,26 +48,35 @@ export type {
   HandoffReason,
 } from "@/features/conversations/server/ai-contract";
 
+/**
+ * REQUEST-SCOPED execution result for ONE `ConversationAi` invocation.
+ *
+ * The response, provider identity, telemetry and policy-unavailable flag are
+ * produced by the SAME call and must never be read from shared mutable
+ * "last result" state. Implementations that can provide this richer result
+ * expose `respondWithExecution`; the engine prefers it over the legacy
+ * `respond` + `getLastTelemetry` pair.
+ */
+export type ConversationAiExecution = {
+  readonly response: AiResponse | null;
+  readonly providerName: string;
+  readonly telemetry: AiTelemetry | null;
+  readonly policyUnavailable: boolean;
+  readonly error: unknown;
+};
+
 /** Provider-neutral assistant over the structured AI contract. */
 export interface ConversationAi {
   /** Honest reporting of WHICH assistant implementation answered. */
   readonly providerName: string;
   respond(request: AiRequest): Promise<AiResponse>;
   /**
-   * OPTIONAL request-scoped result seam. An implementation that owns
-   * per-request provider/telemetry state returns response, provider identity
-   * and telemetry together so a concurrent turn can never read another
-   * turn's "last" telemetry. The engine prefers this over the legacy
-   * `respond` + `getLastTelemetry` pair when present.
+   * OPTIONAL request-scoped execution boundary. When present, the engine uses
+   * exactly this result for routing, counters, usage and attribution. Absent
+   * implementations keep the legacy contract.
    */
-  respondTurn?(request: AiRequest): Promise<ConversationAiTurnResult>;
+  respondWithExecution?(request: AiRequest): Promise<ConversationAiExecution>;
 }
-
-export type ConversationAiTurnResult = {
-  readonly response: AiResponse | null;
-  readonly providerName: string;
-  readonly telemetry: AiTelemetry | null;
-};
 
 // ─── Arabic text normalization ───────────────────────────────────────────────
 

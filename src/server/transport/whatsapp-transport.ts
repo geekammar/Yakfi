@@ -83,16 +83,75 @@ export function isRetryableTransportErrorCode(
   return code === "TRANSIENT_TRANSPORT_FAILURE";
 }
 
+/**
+ * Bounded, secret-safe failure stage. It distinguishes the cases the coarse
+ * `TRANSIENT_TRANSPORT_FAILURE` code necessarily merges: a network uncertainty
+ * (no response), a concrete provider HTTP rejection (429/5xx/4xx), a malformed
+ * provider body, and pre-send connection/credential failures. It NEVER carries
+ * a token, URL, header, raw provider body, or customer content.
+ */
+export const transportFailureStageValues = [
+  "NETWORK",
+  "PROVIDER_HTTP",
+  "PROVIDER_PAYLOAD",
+  "CREDENTIALS",
+  "CONNECTION",
+] as const;
+
+export type TransportFailureStage =
+  (typeof transportFailureStageValues)[number];
+
+/** Optional bounded diagnostics attached to one transport failure. */
+export type TransportErrorDetails = {
+  readonly failureStage?: TransportFailureStage;
+  /** Validated provider HTTP status (100..599), never a raw body/string. */
+  readonly httpStatus?: number;
+  /** Provider-directed retry delay, bounded to a safe integer window. */
+  readonly retryAfterSeconds?: number;
+};
+
+function boundedHttpStatus(value: number | undefined): number | undefined {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 100 &&
+    value <= 599
+    ? value
+    : undefined;
+}
+
+function boundedRetryAfter(value: number | undefined): number | undefined {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= 86_400
+    ? value
+    : undefined;
+}
+
 /** Typed transport failure carrying its normalized category. */
 export class TransportError extends Error {
   readonly code: WhatsAppTransportErrorCode;
   readonly retryable: boolean;
+  readonly failureStage?: TransportFailureStage;
+  readonly httpStatus?: number;
+  readonly retryAfterSeconds?: number;
 
-  constructor(code: WhatsAppTransportErrorCode, message?: string) {
+  constructor(
+    code: WhatsAppTransportErrorCode,
+    message?: string,
+    details?: TransportErrorDetails,
+  ) {
     super(message ?? code);
     this.name = "TransportError";
     this.code = code;
     this.retryable = isRetryableTransportErrorCode(code);
+    if (details?.failureStage) this.failureStage = details.failureStage;
+    const httpStatus = boundedHttpStatus(details?.httpStatus);
+    if (httpStatus !== undefined) this.httpStatus = httpStatus;
+    const retryAfterSeconds = boundedRetryAfter(details?.retryAfterSeconds);
+    if (retryAfterSeconds !== undefined) {
+      this.retryAfterSeconds = retryAfterSeconds;
+    }
   }
 }
 
@@ -333,6 +392,12 @@ export type TransportSendResult = {
   /** Normalized error category when not delivered — the adapter maps
    *  provider-specific failures onto the taxonomy. */
   errorCode?: WhatsAppTransportErrorCode;
+  /** Bounded failure stage when not delivered (see TransportFailureStage). */
+  failureStage?: TransportFailureStage;
+  /** Validated provider HTTP status when the failure was an HTTP response. */
+  httpStatus?: number;
+  /** Provider-directed retry delay when the provider supplied one. */
+  retryAfterSeconds?: number;
   /** Provider message reference/id if returned upon successful acceptance. */
   providerMessageId?: string;
 };
