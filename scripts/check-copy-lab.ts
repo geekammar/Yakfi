@@ -3420,7 +3420,6 @@ async function main(): Promise<void> {
   // ── Q — Runtime relevance vs override connection (separate) ──────────────
   const {
     getCopyRuntimeCoverage,
-    getCopyRuntimeRelevance,
     isKeyConnectedToRuntime,
     getMutationFeedbackText,
     getPublishFeedbackText,
