@@ -2,45 +2,75 @@
 
 > **Tier 0 orientation snapshot — as of 18 November 2026.** Read with
 > `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0 records live
-> Render readiness and the configuration alignment candidate; 00/0A/0B and
-> Sections 1–9 retain all prior release, R5, R6, Y83 and QA249/QA250 evidence
-> unchanged. The Render app is technically ready; Telegram cutover and live
-> product acceptance have not been performed; PR88 remains open.
+> Render readiness and the cutover tooling candidate; 00/0A/0B and Sections 1–9
+> retain all prior release, R5, R6, Y83 and QA249/QA250 evidence unchanged. The
+> Render app is technically ready; Telegram cutover and live product acceptance
+> have not been performed; PR88 remains open.
 
 ## 0. Live Render readiness & configuration alignment — 18 November 2026
 
-- **Current `main` baseline:** `0.79.16`, merge commit
-  `629d05ffbe2c2dc6ba6d0d807556de518bb0fd7e` (PR90 merged 18 November 2026).
-  PR #88 (`74f6594a...`) remains open, Draft, and untouched.
+- **Current `main` baseline:** `0.79.17`, merge commit
+  `e1851deec1406d690807440639761152d3d029e1` (PR91 merged and auto-deployed
+  18 November 2026). PR #88 (`74f6594a...`) remains open, Draft, and untouched.
 - **Technically ready Render app:** existing service `Yakfi`
   (`srv-dbv0igutlv9c73fe4990`) in `My Workspace`
   (`tea-db9st3gm7kps73ek9op0`), region `ohio`, Starter `0.5c-512mb`, URL
   `https://yakfi.onrender.com`. Live deployment
-  `dep-dbv0vm7f3r2c73ent7ug` runs `629d05f` / `0.79.16`;
+  `dep-dbv2akqvcj2c73c0a440` (trigger `new_commit`) runs `e1851de` / `0.79.17`;
   `/api/health/live` and `/api/health` return HTTP `200` with
   `deploymentReady=true`, `database=connected`, and `missingEnvVars=[]`.
 - **Completed configuration:** direct transfer of `DATABASE_URL` +
   `CREDENTIAL_MASTER_KEY` from GitHub Actions secrets via a read-only dry-run
   then apply; `BETTER_AUTH_SECRET` and `OPENROUTER_API_KEY` confirmed present by
   name only. Render auto-deploy is On Commit (`autoDeployTrigger=commit`) for
-  branch `main`.
-- **Configuration alignment candidate (`chore/yakfi-render-config-alignment`,
-  `0.79.17`):** updates `render.yaml` declared name `yakfi-web` → `Yakfi` and
-  `autoDeployTrigger: off` → `commit`. The existing service is managed through
-  the Render Dashboard/API; this Blueprint has **not** been imported or applied,
-  and matching names do not prove Blueprint ownership or adoption.
-- **Read-only cutover preflight:** selected DB/bot credential and fixed
-  business/connection/bot identity verified as `HEALTHY_LOCAL_KEY` with 30
-  migrations `UP_TO_DATE`; Render readiness is HTTP `200`. Telegram
-  `getWebhookInfo` and the signed Render credential-readiness proof remain
-  **UNVERIFIED** because existing cutover tooling is Vercel-hardcoded and the
-  Production-environment credential path is unresolved. No webhook move was
-  performed; `pending_update_count` and last delivery error remain **UNKNOWN**
-  and must be checked again at actual cutover.
-- **Not done / not verified:** Telegram webhook cutover, Telegram messages,
-  live product acceptance, and `512 MB` capacity measurement. The Render
-  Blueprint ownership/adoption remains unestablished. PR88 remains separate.
-  Historical R5/R6/Y83 and QA249/QA250 evidence is unchanged.
+  branch `main`; PR91 aligned `render.yaml` (`Yakfi`, `commit`) on `main`.
+  The service is managed through the Render Dashboard/API; this Blueprint has
+  **not** been imported or applied, and matching names do not prove Blueprint
+  ownership or adoption.
+- **Read-only cutover evidence before the new tool:** selected DB/bot credential
+  and fixed business/connection/bot identity verified as `HEALTHY_LOCAL_KEY`
+  with 30 migrations `UP_TO_DATE`; Render readiness is HTTP `200`. Legacy
+  `production-telegram-repair` and `cutover-main-runtime-*` paths are not
+  suitable for the Render/selected-DB target, so `getWebhookInfo` and the signed
+  Render credential-readiness proof were not previously obtained.
+- **Cutover tooling candidate (`feat/yakfi-render-telegram-cutover`,
+  `0.79.18`):** adds manual-only
+  `.github/workflows/render-telegram-cutover.yml` +
+  `scripts/render-telegram-cutover.ts` for a read-only `preflight` (default) and
+  an explicit `apply`. The tool pins the Render destination, requires exact
+  checkout/deployed SHA/version and fixed workspace/service/Business/Connection/
+  Bot identity, uses the selected `TEST_DATABASE_URL` +
+  `CREDENTIAL_MASTER_KEY` path plus existing `RENDER_API_KEY` for fixed
+  service/workspace/region verification, calls `getWebhookInfo`, verifies signed
+  Render runtime readiness, requires `pending_update_count === 0` for apply,
+  never uses `drop_pending_updates`, and reports partial failures without blind
+  retry. Already-at-destination reports Telegram-observed vs desired
+  `allowed_updates` separately; a URL match with any extra/missing set is
+  blocked, not treated as exact readiness. An explicit `operation=reconcile`
+  is the guarded in-place secret reset/corrective path; it is never automatic.
+  When exact `allowedUpdates` is supplied, post-apply verification checks the
+  observed set exactly and returns a truthful partial failure on mismatch.
+  Raw `allowed_updates` is validated before normalization; missing,
+  non-array, null, mixed-type or empty-string observations block preflight as
+  `OBSERVED_ALLOWED_UPDATES_MALFORMED` and cannot be exact, and the switch
+  refuses them as `MALFORMED_ALLOWED_UPDATES` when exact updates are required.
+  Legacy callers that omit `allowedUpdates` keep the prior merge/include
+  behavior. Partial apply/reconcile results report post-operation observed
+  settings only when Telegram was actually inspected; otherwise they remain
+  `UNKNOWN`, while desired settings stay separate.
+  CI run `44520995005` passed the code HEAD `8c4afbf` with **35/35** cutover
+  checks and 27/27 Render migration checks. Manual `workflow_dispatch` from the candidate
+  branch is unavailable until the workflow exists on `main` (GitHub returns
+  404); no live read-only preflight was executed from the candidate and no
+  local secret workaround was used. No live webhook change was made.
+- **Not done / not verified:** live `getWebhookInfo`/pending backlog via the new
+  workflow (candidate is not on `main` until merge), Telegram webhook cutover,
+  Telegram messages, live product acceptance, and workload capacity testing.
+  The reviewer previously observed approximately **272–281 MiB of a 512 MiB
+  limit over about 46 minutes**; this is a historical idle baseline, not proof
+  of workload capacity. The Render Blueprint ownership/adoption remains
+  unestablished. PR88 remains separate. Historical R5/R6/Y83 and QA249/QA250
+  evidence is unchanged.
 
 ## 00. Prior acceptance evidence completion — 16 November 2026
 

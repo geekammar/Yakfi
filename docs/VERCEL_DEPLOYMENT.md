@@ -274,9 +274,10 @@ deployment log (Builds → failed deployment → inspect) cover the rest.
 - **Scope boundary:** keep the existing Neon PostgreSQL database and existing
   Telegram bots. Add **no** Render Postgres, Redis/Key-Value, worker, queue,
   persistent disk, Docker container, or Cron Job.
-- **Unverified capacity note:** `512 MB` RAM runtime headroom under concurrent
-  SSR + Prisma + AI/Telegram turns remains **unverified** until measured live on
-  Render Metrics.
+- **Capacity note:** the reviewer previously observed approximately **272–281
+  MiB of a 512 MiB limit over about 46 minutes**. This is a historical idle
+  baseline, not workload capacity. Headroom under concurrent SSR + Prisma +
+  AI/Telegram turns remains **unverified** until a workload test.
 - **Owner billing verification (before first deploy):** Ammar verifies in Render
   Dashboard → Billing:
   1. Exact remaining balance of the $50 promotional credit and its exact expiry
@@ -466,14 +467,54 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
        `FLOWPILOT_AI_GLOBAL_STOP=true` so queued messages persist safely as
        staff handoffs with zero paid AI calls and zero automated bookings, or
        explicit owner-signed drop).
-   - **Current tooling limitation (18 November 2026):** the existing
-     `cutover-main-runtime-*` operations and `switch-test-bot-webhook.ts` are
-     hardcoded to the Vercel Production origin; they cannot target
-     `https://yakfi.onrender.com/api/telegram/webhook`. The Render-capable
-     `verifyRenderCutoverReadinessAndBacklog` exists but is not exposed by an
-     existing workflow/CLI. Do **not** run `cutover-main-runtime-apply` for
-     Render; use a reviewed Render-targeted read-only preflight and switch tool
-     after separate approval.
+   - **Render-targeted cutover tool (manual only):**
+     `.github/workflows/render-telegram-cutover.yml` +
+     `scripts/render-telegram-cutover.ts` expose `operation=preflight` (default,
+     read-only), `operation=apply` (explicit), and `operation=reconcile`
+     (explicit guarded secret reset). The destination is pinned to
+     `https://yakfi.onrender.com/api/telegram/webhook`; fixed
+     workspace/service, Business/Connection/Bot, selected active DB, exact
+     checkout/deployed SHA, and expected version are required. Preflight
+     resolves the selected bot credential from the selected DB/master key,
+     verifies `getMe`, calls `getWebhookInfo` (URL, pending count, observation
+     time, observed vs desired allowed_updates, last error), and verifies the
+     signed Render `/api/operator/cutover-readiness` proof. Apply requires a
+     fresh preflight, `pending_update_count === 0`, the expected current URL,
+     exact `allowed_updates: ["message", "callback_query"]`, never enables
+     `drop_pending_updates`, and treats a genuinely exact already-at-destination
+     registration as a zero-write no-op. A matching URL with extra/missing
+     allowed_updates is blocked as `ALREADY_AT_DESTINATION_SETTINGS_MISMATCH`,
+     not treated as exact readiness. Raw observations are validated before
+     normalization: `allowed_updates` must be an array of non-empty strings.
+     Missing, non-array, null, mixed-type, or empty-string values block
+     preflight as `OBSERVED_ALLOWED_UPDATES_MALFORMED` and cannot produce
+     `exactSettingsMatch=true`; with explicit `allowedUpdates`, the switch
+     refuses such raw current observations as `MALFORMED_ALLOWED_UPDATES`
+     before mutation. When exact `allowedUpdates` is supplied, post-apply
+     verification checks the Telegram-observed set exactly (order-insensitive)
+     and rejects extra/missing/malformed raw sets. Legacy callers that omit
+     `allowedUpdates` retain the previous merge/include behavior.
+     Unknown/non-zero backlog or any
+     failed identity/readiness check blocks apply. Do **not** use the legacy
+     `cutover-main-runtime-*` Vercel operations for Render. The workflow must
+     exist on `main` before its first manual dispatch; GitHub rejects dispatch
+     from a feature branch.
+   - **Explicit reconciliation (`operation=reconcile`):** requires a fresh
+     preflight, Render current URL, zero backlog, resolved identity and signed
+     runtime readiness, then resets the Telegram webhook secret in place and
+     persists the new DB hash with exact allowed_updates. It is never automatic
+     after an uncertain failure. `getWebhookInfo` cannot reveal the webhook
+     secret; a stored hash alone does not prove it matches Telegram; signed
+     readiness proves bot credential resolution, not webhook secret
+     synchronization. A real delivery test is still required for delivery
+     acceptance.
+   - **Partial-failure boundary:** Telegram `setWebhook` and PostgreSQL
+     `webhook_secret_hash` persistence are not atomic. On partial or ambiguous
+     failure, inspect `getWebhookInfo` and the DB hash, then use the reviewed
+     reconciliation procedure; never retry blindly. Partial apply/reconcile
+     results report post-operation settings as observed only when a real
+     Telegram inspection returned them; otherwise they are `UNKNOWN`. Desired
+     settings remain separate and are never promoted to observed state.
 6. **Post-Cutover Verification & Release Tagging:**
    - Re-verify `getWebhookInfo` (`url === https://<render-origin>/api/telegram/webhook`,
      `allowed_updates` includes `message` and `callback_query`).
@@ -482,11 +523,11 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
 
 ### 7.6 Rollback Plan & PR #88 Separation
 
-- **Application rollback target:** the current live deployment
-  `dep-dbv0vm7f3r2c73ent7ug` is the **first successful Render deployment**; there
-  is no earlier known-good Render deployment to roll back to. A future rollback
-  must target a later verified deployment or a reviewed forward fix. Do not
-  claim a tested Render rollback exists.
+- **Application rollback target:** the current live deployment is
+  `dep-dbv2akqvcj2c73c0a440` at `e1851de` / `0.79.17`. The previous successful
+  Render deployment `dep-dbv0vm7f3r2c73ent7ug` at `629d05f` / `0.79.16` is
+  deactivated but remains a potential rollback target. A Render rollback to a
+  previous deployment has **not** been tested; do not claim it is verified.
 - **Vercel is NOT a rollback target:** while Vercel returns HTTP `402`
   `DEPLOYMENT_DISABLED` (and its Production Sensitive secrets cannot be read
   back), never treat Vercel as an available fallback runtime.
@@ -496,7 +537,7 @@ Pinned runtime versions: Node `22` (`.node-version` + `package.json`
 - **PR #88 separation:** draft PR #88 (`feat/durable-turn-usage-cost-evidence`)
   and its additive Prisma migrations remain an independent reviewed decision at
   `0.79.15`; it is not merged or modified. This branch is based on `main`
-  `0.79.16` and carries `0.79.17`; coordinate any later PR88 merge with the
+  `0.79.17` and carries `0.79.18`; coordinate any later PR88 merge with the
   then-current `main` version so `pnpm check:version` remains monotonic.
 
 ### 7.7 Automatic Deploy Activation (after initial readiness)

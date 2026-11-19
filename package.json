@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.79.17",
+  "version": "0.79.18",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -37,6 +37,7 @@
     "check:update-production-runtime-env": "tsx scripts/check-update-production-runtime-env.ts",
     "check:cutover-readiness": "tsx scripts/check-cutover-readiness.ts",
     "check:render-migration": "tsx scripts/check-render-migration.ts",
+    "check:render-telegram-cutover": "tsx scripts/check-render-telegram-cutover.ts",
     "check:render-runtime-db": "tsx scripts/check-render-runtime-db.ts",
     "check:telegram-onboarding": "tsx scripts/check-telegram-onboarding.ts",
     "check:telegram-ux001": "tsx scripts/check-telegram-ux001.ts",

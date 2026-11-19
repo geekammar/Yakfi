@@ -1,5 +1,70 @@
 # FlowPilot — Build State
 
+## Render-targeted Telegram cutover tooling (Draft PR, v0.79.18) — 18 November 2026
+
+- Baseline: PR91 merged at `e1851deec1406d690807440639761152d3d029e1` /
+  `0.79.17`; Render auto-deployed it as `dep-dbv2akqvcj2c73c0a440`
+  (`trigger: new_commit`, live). `/api/health/live` and `/api/health` both
+  return HTTP `200` with version `0.79.17`, exact SHA, `production`, DB
+  `connected`, `deploymentReady=true`, and `missingEnvVars=[]`.
+- Candidate: manual-only `.github/workflows/render-telegram-cutover.yml` +
+  `scripts/render-telegram-cutover.ts`. `operation=preflight` is read-only and
+  default; `operation=apply` is explicit. The destination is pinned to
+  `https://yakfi.onrender.com/api/telegram/webhook`; fixed workspace/service,
+  Business/Connection/Bot, selected `TEST_DATABASE_URL` + `CREDENTIAL_MASTER_KEY`,
+  existing `RENDER_API_KEY` for service/workspace/region verification, exact
+  checkout/deployed SHA, and expected version are required.
+- Preflight resolves the selected bot credential, verifies `getMe`, calls
+  `getWebhookInfo` (current URL, pending count, observation time, allowed
+  updates, sanitized last error), validates pending as a nonnegative integer,
+  and verifies the signed Render `/api/operator/cutover-readiness` proof. It
+  reports observed vs desired `allowed_updates` separately; a matching URL
+  with any extra/missing set is blocked as
+  `ALREADY_AT_DESTINATION_SETTINGS_MISMATCH`, not treated as exact readiness.
+- Apply reruns preflight immediately before mutation, requires pending `0`,
+  the expected current URL, exact checkout/deployed SHA, and exact
+  `allowed_updates: ["message","callback_query"]`; it never enables
+  `drop_pending_updates`, treats a genuinely exact already-at-destination as a
+  zero-write no-op, and returns truthful partial/ambiguous failures without
+  blind retry. Raw `allowed_updates` is validated before normalization:
+  missing, non-array, null, mixed-type or empty-string observations block
+  preflight as `OBSERVED_ALLOWED_UPDATES_MALFORMED` and cannot be exact; with
+  explicit `allowedUpdates`, the switch rejects them as
+  `MALFORMED_ALLOWED_UPDATES` before mutation. When exact `allowedUpdates` is
+  supplied, post-apply verifies the Telegram-observed set exactly
+  (order-insensitive) and rejects extra/missing/malformed raw sets. Legacy
+  callers that omit `allowedUpdates` keep the prior merge/include behavior.
+  Partial apply/reconcile results report post-operation observations only when
+  a real Telegram inspection returned them; otherwise they are `UNKNOWN`, and
+  desired settings are never promoted to observed state.
+- `operation=reconcile` is the explicit guarded corrective path: it requires a
+  fresh preflight, Render current URL, zero backlog, resolved bot identity and
+  signed runtime readiness, then resets the Telegram webhook secret in place
+  and persists the new DB hash with exact allowed updates. It is never
+  automatic after uncertain failure. `getWebhookInfo` cannot reveal the secret;
+  a stored hash alone does not prove synchronization; signed readiness proves
+  bot credential resolution, not webhook secret synchronization or delivery.
+- Added `check:render-telegram-cutover` in CI for fixed Render target/identity,
+  read-only zero mutations, wrong SHA/version/DB/bot/current URL, invalid/
+  unknown/nonzero pending counts, failed signed readiness/unresolved credential,
+  observed-vs-desired already-at-destination, malformed raw observations,
+  exact post-apply sets, setWebhook followed by DB persistence failure,
+  explicit guarded reconciliation, no-automatic-retry partial/ambiguous
+  failures, and observed-versus-desired separation using controlled Telegram
+  responses. CI run `44520995005` passed the code HEAD `8c4afbf` with
+  **35/35** cutover checks, 27/27 Render migration checks, `v0.79.18`, and
+  Playwright 175 passed / 0 failed / 15 skipped after transient infrastructure
+  reruns.
+- RAM observation: the reviewer previously observed approximately **272–281 MiB
+  of a 512 MiB limit over about 46 minutes**; this is a historical idle baseline,
+  not proof of workload capacity.
+- The candidate workflow cannot be dispatched until it exists on `main`
+  (GitHub returned 404 on the candidate ref); no local secret-bearing
+  workaround was used, so no live read-only preflight was executed. No live
+  `setWebhook`/`deleteWebhook`, secret/hash write, Telegram send, paid AI call,
+  migration, application DB write, Blueprint import, Rabet change, or PR88
+  change was performed.
+
 ## Render configuration alignment and read-only cutover preflight (Draft PR, v0.79.17) — 18 November 2026
 
 - Baseline: `main` `629d05ffbe2c2dc6ba6d0d807556de518bb0fd7e` / `0.79.16`;
