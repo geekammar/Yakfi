@@ -75,9 +75,7 @@ const FULL_SHA_RE = /^[0-9a-f]{40}$/;
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 
 export type RenderTelegramCutoverOperation =
-  | "preflight"
-  | "apply"
-  | "reconcile";
+  "preflight" | "apply" | "reconcile";
 
 export type RenderTelegramPreflightParams = {
   expectedCommitSha: string;
@@ -672,10 +670,7 @@ export async function applyRenderTelegramCutover(
         outcome.desiredAllowedUpdates ?? preflight.desiredAllowedUpdates,
       exactSettingsMatch:
         outcome.exactSettingsMatch ??
-        sameStringSet(
-          outcome.allowedUpdates,
-          preflight.desiredAllowedUpdates,
-        ),
+        sameStringSet(outcome.allowedUpdates, preflight.desiredAllowedUpdates),
       webhookSecretHashPersisted: outcome.webhookSecretHashPersisted,
       postApplyReadiness: postReadiness,
     });
@@ -688,7 +683,8 @@ export async function applyRenderTelegramCutover(
       "ALREADY_AT_DESTINATION",
       {
         webhookUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
-        allowedUpdates: outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
+        allowedUpdates:
+          outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
         observedAllowedUpdates:
           outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
         desiredAllowedUpdates:
@@ -788,10 +784,7 @@ export async function reconcileRenderTelegramCutover(
   if (!preflight.renderReadiness.ok) {
     return applyResult(preflight, "BLOCKED", "RENDER_READINESS_NOT_VERIFIED");
   }
-  if (
-    !preflight.actionsCredentialResolved ||
-    !preflight.botIdentityVerified
-  ) {
+  if (!preflight.actionsCredentialResolved || !preflight.botIdentityVerified) {
     return applyResult(
       preflight,
       "BLOCKED",
@@ -813,12 +806,9 @@ export async function reconcileRenderTelegramCutover(
       allowedUpdates: [...RENDER_TELEGRAM_CUTOVER_TARGET.allowedUpdates],
     });
   } catch {
-    return applyResult(
-      preflight,
-      "FAILED",
-      "UNEXPECTED_RECONCILIATION_ERROR",
-      { remoteStateMayHaveChanged: true },
-    );
+    return applyResult(preflight, "FAILED", "UNEXPECTED_RECONCILIATION_ERROR", {
+      remoteStateMayHaveChanged: true,
+    });
   }
 
   if (outcome.ok && outcome.status === "SWITCHED") {

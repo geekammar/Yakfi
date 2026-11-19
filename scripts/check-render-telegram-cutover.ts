@@ -131,7 +131,7 @@ function createTelegramFake(options: TelegramFakeOptions = {}) {
     if (url.endsWith("/getWebhookInfo")) {
       getWebhookInfoCount += 1;
       const observedAllowedUpdates = postApply
-        ? options.postAllowedUpdates ?? options.allowedUpdates
+        ? (options.postAllowedUpdates ?? options.allowedUpdates)
         : options.allowedUpdates;
       return new Response(
         JSON.stringify({
@@ -866,8 +866,7 @@ async function main(): Promise<void> {
           body.drop_pending_updates === false) &&
         repo.getUpdateCount() === 1 &&
         result.webhookSecretHashPersisted === true &&
-        result.observedAllowedUpdates?.join(",") ===
-          "message,callback_query" &&
+        result.observedAllowedUpdates?.join(",") === "message,callback_query" &&
         result.desiredAllowedUpdates?.join(",") === "message,callback_query" &&
         result.exactSettingsMatch === true,
     );
@@ -905,8 +904,7 @@ async function main(): Promise<void> {
       result.ok === true &&
         result.status === "ALREADY_AT_DESTINATION" &&
         result.allowedUpdates.join(",") === "message,callback_query" &&
-        result.observedAllowedUpdates?.join(",") ===
-          "message,callback_query" &&
+        result.observedAllowedUpdates?.join(",") === "message,callback_query" &&
         result.desiredAllowedUpdates?.join(",") === "message,callback_query" &&
         result.exactSettingsMatch === true &&
         telegram.getSetWebhookCount() === 0 &&
@@ -1108,8 +1106,7 @@ async function main(): Promise<void> {
     const result = await reconcileRenderTelegramCutover(
       {
         ...preflightParams(),
-        expectedCurrentWebhookUrl:
-          RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+        expectedCurrentWebhookUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
       },
       deps,
     );
@@ -1122,8 +1119,7 @@ async function main(): Promise<void> {
         captured !== undefined &&
         captured.expectedCurrentUrl ===
           RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl &&
-        captured.destinationUrl ===
-          RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl &&
+        captured.destinationUrl === RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl &&
         captured.apply === true &&
         captured.allowAlreadyAtDestination === false &&
         captured.requireZeroPendingUpdates === true &&
@@ -1137,8 +1133,7 @@ async function main(): Promise<void> {
     const wrongUrl = await reconcileRenderTelegramCutover(
       {
         ...preflightParams(),
-        expectedCurrentWebhookUrl:
-          RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+        expectedCurrentWebhookUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
       },
       wrongUrlDeps.deps,
     );
@@ -1151,8 +1146,7 @@ async function main(): Promise<void> {
     const pending = await reconcileRenderTelegramCutover(
       {
         ...preflightParams(),
-        expectedCurrentWebhookUrl:
-          RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+        expectedCurrentWebhookUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
       },
       pendingDeps.deps,
     );
@@ -1179,14 +1173,15 @@ async function main(): Promise<void> {
     const result = await reconcileRenderTelegramCutover(
       {
         ...preflightParams(),
-        expectedCurrentWebhookUrl:
-          RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+        expectedCurrentWebhookUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
       },
       deps,
     );
     check(
       "P20. Reconciliation is the explicit corrective operation for a matching URL with wrong observed updates",
-      result.status === "RECONCILED" && result.ok === true && getSwitchCalls() === 1,
+      result.status === "RECONCILED" &&
+        result.ok === true &&
+        getSwitchCalls() === 1,
     );
   }
 
@@ -1213,8 +1208,7 @@ async function main(): Promise<void> {
     const result = await reconcileRenderTelegramCutover(
       {
         ...preflightParams(),
-        expectedCurrentWebhookUrl:
-          RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+        expectedCurrentWebhookUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
       },
       deps,
     );

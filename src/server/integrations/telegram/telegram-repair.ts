@@ -745,10 +745,7 @@ export async function repairTelegramBotWebhookDefault(
 const SWITCH_UUID_REGEX =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
-export function sameStringSet(
-  observed: string[],
-  expected: string[],
-): boolean {
+export function sameStringSet(observed: string[], expected: string[]): boolean {
   const left = [...new Set(observed)].sort();
   const right = [...new Set(expected)].sort();
   return (
@@ -1412,8 +1409,7 @@ export async function switchTelegramBotWebhook(
   const exactPostRequired = params.allowedUpdates !== undefined;
   const postMatches = exactPostRequired
     ? sameStringSet(postUpdates, targetUpdates)
-    : postUpdates.includes("message") &&
-      postUpdates.includes("callback_query");
+    : postUpdates.includes("message") && postUpdates.includes("callback_query");
   if (!postMatches) {
     return {
       ok: false,
