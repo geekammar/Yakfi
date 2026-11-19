@@ -31,6 +31,7 @@ import {
   type TelegramApiDeps,
 } from "@/server/integrations/telegram/telegram-client";
 import {
+  sameStringSet,
   switchTelegramBotWebhookDefault,
   validateCustomerWebhookUrl,
   type SwitchTelegramWebhookOutcome,
@@ -73,7 +74,10 @@ export const RENDER_TELEGRAM_CUTOVER_TARGET = {
 const FULL_SHA_RE = /^[0-9a-f]{40}$/;
 const VERSION_RE = /^\d+\.\d+\.\d+$/;
 
-export type RenderTelegramCutoverOperation = "preflight" | "apply";
+export type RenderTelegramCutoverOperation =
+  | "preflight"
+  | "apply"
+  | "reconcile";
 
 export type RenderTelegramPreflightParams = {
   expectedCommitSha: string;
@@ -120,6 +124,9 @@ export type RenderTelegramPreflightResult = {
   pendingUpdateCount: number | null;
   pendingUpdateCountValid: boolean;
   allowedUpdates: string[];
+  observedAllowedUpdates: string[];
+  desiredAllowedUpdates: string[];
+  exactSettingsMatch: boolean;
   lastErrorDate: number | null;
   lastErrorMessage: string | null;
   actionsCredentialResolved: boolean;
@@ -139,6 +146,7 @@ export type RenderTelegramApplyResult = {
   ok: boolean;
   status:
     | "SWITCHED"
+    | "RECONCILED"
     | "ALREADY_AT_DESTINATION"
     | "BLOCKED"
     | "PARTIAL_FAILURE"
@@ -147,6 +155,9 @@ export type RenderTelegramApplyResult = {
   preflight: RenderTelegramPreflightResult;
   webhookUrl?: string;
   allowedUpdates?: string[];
+  observedAllowedUpdates?: string[];
+  desiredAllowedUpdates?: string[];
+  exactSettingsMatch?: boolean;
   webhookSecretHashPersisted?: boolean;
   postApplyReadiness?: RenderRuntimeReadiness;
   remoteStateMayHaveChanged?: boolean;
@@ -187,6 +198,9 @@ function basePreflightResult(
     pendingUpdateCount: null,
     pendingUpdateCountValid: false,
     allowedUpdates: [],
+    observedAllowedUpdates: [],
+    desiredAllowedUpdates: [...RENDER_TELEGRAM_CUTOVER_TARGET.allowedUpdates],
+    exactSettingsMatch: false,
     lastErrorDate: null,
     lastErrorMessage: null,
     actionsCredentialResolved: false,
@@ -430,6 +444,13 @@ export async function preflightRenderTelegramCutover(
     readinessDeps(deps),
   );
 
+  const desiredAllowedUpdates = [
+    ...RENDER_TELEGRAM_CUTOVER_TARGET.allowedUpdates,
+  ];
+  const exactSettingsMatch = sameStringSet(
+    webhook.allowedUpdates,
+    desiredAllowedUpdates,
+  );
   const telemetry = {
     ...base,
     ok: true,
@@ -437,6 +458,9 @@ export async function preflightRenderTelegramCutover(
     pendingUpdateCount: webhook.pendingUpdateCount,
     pendingUpdateCountValid: webhook.pendingUpdateCountValid,
     allowedUpdates: webhook.allowedUpdates,
+    observedAllowedUpdates: webhook.allowedUpdates,
+    desiredAllowedUpdates,
+    exactSettingsMatch,
     lastErrorDate: webhook.lastErrorDate,
     lastErrorMessage: webhook.lastErrorMessage,
     actionsCredentialResolved: true,
@@ -474,6 +498,14 @@ export async function preflightRenderTelegramCutover(
         readyForApply: false,
       };
     }
+    if (!exactSettingsMatch) {
+      return {
+        ...telemetry,
+        status: "BLOCKED",
+        code: "ALREADY_AT_DESTINATION_SETTINGS_MISMATCH",
+        readyForApply: false,
+      };
+    }
     return {
       ...telemetry,
       status: "ALREADY_AT_DESTINATION",
@@ -506,10 +538,16 @@ function applyResult(
   extra: Partial<RenderTelegramApplyResult> = {},
 ): RenderTelegramApplyResult {
   return {
-    ok: status === "SWITCHED" || status === "ALREADY_AT_DESTINATION",
+    ok:
+      status === "SWITCHED" ||
+      status === "RECONCILED" ||
+      status === "ALREADY_AT_DESTINATION",
     status,
     code,
     preflight,
+    observedAllowedUpdates: preflight.observedAllowedUpdates,
+    desiredAllowedUpdates: preflight.desiredAllowedUpdates,
+    exactSettingsMatch: preflight.exactSettingsMatch,
     recoveryInstruction:
       "Do not retry blindly. Inspect Telegram getWebhookInfo and the DB webhook_secret_hash, then use the reviewed reconciliation procedure.",
     ...extra,
@@ -540,7 +578,10 @@ export async function applyRenderTelegramCutover(
   if (preflight.status === "ALREADY_AT_DESTINATION") {
     return applyResult(preflight, "ALREADY_AT_DESTINATION", preflight.code, {
       webhookUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
-      allowedUpdates: [...RENDER_TELEGRAM_CUTOVER_TARGET.allowedUpdates],
+      allowedUpdates: preflight.observedAllowedUpdates,
+      observedAllowedUpdates: preflight.observedAllowedUpdates,
+      desiredAllowedUpdates: preflight.desiredAllowedUpdates,
+      exactSettingsMatch: preflight.exactSettingsMatch,
       postApplyReadiness: preflight.renderReadiness,
     });
   }
@@ -625,6 +666,16 @@ export async function applyRenderTelegramCutover(
     return applyResult(preflight, "SWITCHED", "SWITCHED", {
       webhookUrl: outcome.webhookUrl,
       allowedUpdates: outcome.allowedUpdates,
+      observedAllowedUpdates:
+        outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
+      desiredAllowedUpdates:
+        outcome.desiredAllowedUpdates ?? preflight.desiredAllowedUpdates,
+      exactSettingsMatch:
+        outcome.exactSettingsMatch ??
+        sameStringSet(
+          outcome.allowedUpdates,
+          preflight.desiredAllowedUpdates,
+        ),
       webhookSecretHashPersisted: outcome.webhookSecretHashPersisted,
       postApplyReadiness: postReadiness,
     });
@@ -637,7 +688,13 @@ export async function applyRenderTelegramCutover(
       "ALREADY_AT_DESTINATION",
       {
         webhookUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
-        allowedUpdates: outcome.allowedUpdates,
+        allowedUpdates: outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
+        observedAllowedUpdates:
+          outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
+        desiredAllowedUpdates:
+          outcome.desiredAllowedUpdates ?? preflight.desiredAllowedUpdates,
+        exactSettingsMatch:
+          outcome.exactSettingsMatch ?? preflight.exactSettingsMatch,
         postApplyReadiness: preflight.renderReadiness,
       },
     );
@@ -665,6 +722,183 @@ export async function applyRenderTelegramCutover(
     blockedCodes.has(outcome.code) ? "BLOCKED" : "FAILED",
     outcome.code,
   );
+}
+
+export async function reconcileRenderTelegramCutover(
+  params: RenderTelegramApplyParams,
+  deps: RenderTelegramCutoverDeps,
+): Promise<RenderTelegramApplyResult> {
+  const preflight = await preflightRenderTelegramCutover(params, deps);
+
+  if (preflight.status === "FAILED") {
+    return applyResult(preflight, "FAILED", preflight.code);
+  }
+
+  if (
+    params.expectedCommitSha.trim().toLowerCase() !==
+    params.actualCommitSha.trim().toLowerCase()
+  ) {
+    return applyResult(
+      preflight,
+      "BLOCKED",
+      "RECONCILIATION_REQUIRES_CHECKOUT_EQUALS_DEPLOYED",
+    );
+  }
+
+  const expectedCurrentValidation = validateCustomerWebhookUrl(
+    params.expectedCurrentWebhookUrl,
+    "الرابط الحالي المتوقع للمصالحة",
+  );
+  if (!expectedCurrentValidation.ok) {
+    return applyResult(
+      preflight,
+      "FAILED",
+      "INVALID_EXPECTED_CURRENT_WEBHOOK_URL",
+    );
+  }
+  if (
+    expectedCurrentValidation.normalizedUrl !==
+    RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl
+  ) {
+    return applyResult(
+      preflight,
+      "BLOCKED",
+      "RECONCILIATION_REQUIRES_RENDER_CURRENT_URL",
+    );
+  }
+  if (
+    preflight.currentWebhookUrl !== RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl
+  ) {
+    return applyResult(
+      preflight,
+      "BLOCKED",
+      "RECONCILIATION_REQUIRES_RENDER_CURRENT_URL",
+    );
+  }
+  if (!preflight.pendingUpdateCountValid) {
+    return applyResult(preflight, "BLOCKED", "PENDING_UPDATE_COUNT_UNKNOWN");
+  }
+  if ((preflight.pendingUpdateCount ?? 0) > 0) {
+    return applyResult(
+      preflight,
+      "BLOCKED",
+      "PENDING_UPDATES_REQUIRE_DISPOSITION",
+    );
+  }
+  if (!preflight.renderReadiness.ok) {
+    return applyResult(preflight, "BLOCKED", "RENDER_READINESS_NOT_VERIFIED");
+  }
+  if (
+    !preflight.actionsCredentialResolved ||
+    !preflight.botIdentityVerified
+  ) {
+    return applyResult(
+      preflight,
+      "BLOCKED",
+      "RECONCILIATION_IDENTITY_NOT_VERIFIED",
+    );
+  }
+
+  let outcome: SwitchTelegramWebhookOutcome;
+  try {
+    outcome = await deps.switchWebhook({
+      businessId: RENDER_TELEGRAM_CUTOVER_TARGET.businessId,
+      connectionId: RENDER_TELEGRAM_CUTOVER_TARGET.connectionId,
+      expectedCurrentUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+      destinationUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+      expectedBotExternalId: RENDER_TELEGRAM_CUTOVER_TARGET.botExternalId,
+      apply: true,
+      allowAlreadyAtDestination: false,
+      requireZeroPendingUpdates: true,
+      allowedUpdates: [...RENDER_TELEGRAM_CUTOVER_TARGET.allowedUpdates],
+    });
+  } catch {
+    return applyResult(
+      preflight,
+      "FAILED",
+      "UNEXPECTED_RECONCILIATION_ERROR",
+      { remoteStateMayHaveChanged: true },
+    );
+  }
+
+  if (outcome.ok && outcome.status === "SWITCHED") {
+    const postCredential = await resolveSelectedRuntimeCredential(deps);
+    if (!postCredential.ok) {
+      return applyResult(
+        preflight,
+        "PARTIAL_FAILURE",
+        "POST_RECONCILE_CREDENTIAL_RESOLUTION_FAILED",
+        {
+          webhookUrl: outcome.webhookUrl,
+          allowedUpdates: outcome.allowedUpdates,
+          observedAllowedUpdates:
+            outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
+          desiredAllowedUpdates:
+            outcome.desiredAllowedUpdates ?? preflight.desiredAllowedUpdates,
+          exactSettingsMatch: outcome.exactSettingsMatch ?? false,
+          webhookSecretHashPersisted: outcome.webhookSecretHashPersisted,
+          remoteStateMayHaveChanged: true,
+        },
+      );
+    }
+    const postReadiness = await deps.verifyRenderReadiness(
+      {
+        renderOrigin: RENDER_TELEGRAM_CUTOVER_TARGET.origin,
+        expectedCommitSha: params.expectedCommitSha.trim().toLowerCase(),
+        expectedVersion: params.expectedVersion.trim(),
+        databaseUrl: params.databaseUrl,
+        cutoverSignerCred: postCredential.token,
+      },
+      readinessDeps(deps),
+    );
+    if (!postReadiness.ok) {
+      return applyResult(
+        preflight,
+        "PARTIAL_FAILURE",
+        "POST_RECONCILE_RUNTIME_READINESS_FAILED",
+        {
+          webhookUrl: outcome.webhookUrl,
+          allowedUpdates: outcome.allowedUpdates,
+          observedAllowedUpdates:
+            outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
+          desiredAllowedUpdates:
+            outcome.desiredAllowedUpdates ?? preflight.desiredAllowedUpdates,
+          exactSettingsMatch: outcome.exactSettingsMatch ?? false,
+          webhookSecretHashPersisted: outcome.webhookSecretHashPersisted,
+          postApplyReadiness: postReadiness,
+          remoteStateMayHaveChanged: true,
+        },
+      );
+    }
+    return applyResult(preflight, "RECONCILED", "RECONCILED", {
+      webhookUrl: outcome.webhookUrl,
+      allowedUpdates: outcome.allowedUpdates,
+      observedAllowedUpdates:
+        outcome.observedAllowedUpdates ?? outcome.allowedUpdates,
+      desiredAllowedUpdates:
+        outcome.desiredAllowedUpdates ?? preflight.desiredAllowedUpdates,
+      exactSettingsMatch: outcome.exactSettingsMatch ?? false,
+      webhookSecretHashPersisted: outcome.webhookSecretHashPersisted,
+      postApplyReadiness: postReadiness,
+    });
+  }
+
+  if (outcome.ok) {
+    return applyResult(preflight, "FAILED", "UNEXPECTED_RECONCILIATION_STATUS");
+  }
+
+  if (outcome.status === "PARTIAL_FAILURE") {
+    return applyResult(preflight, "PARTIAL_FAILURE", outcome.code, {
+      webhookUrl: outcome.webhookUrl,
+      allowedUpdates: outcome.targetAllowedUpdates,
+      observedAllowedUpdates: outcome.targetAllowedUpdates,
+      desiredAllowedUpdates: preflight.desiredAllowedUpdates,
+      exactSettingsMatch: false,
+      remoteStateMayHaveChanged: outcome.remoteStateMayHaveChanged ?? true,
+    });
+  }
+
+  return applyResult(preflight, "FAILED", outcome.code);
 }
 
 export async function defaultRenderTelegramCutoverDeps(): Promise<RenderTelegramCutoverDeps> {
@@ -710,7 +944,13 @@ function printPreflight(result: RenderTelegramPreflightResult): void {
     `- **Pending Count Valid**: \`${String(result.pendingUpdateCountValid)}\``,
   );
   writeSummaryLine(
-    `- **Allowed Updates**: \`${result.allowedUpdates.join(", ") || "none"}\``,
+    `- **Observed Allowed Updates**: \`${result.observedAllowedUpdates.join(", ") || "none"}\``,
+  );
+  writeSummaryLine(
+    `- **Desired Allowed Updates**: \`${result.desiredAllowedUpdates.join(", ") || "none"}\``,
+  );
+  writeSummaryLine(
+    `- **Exact Settings Match**: \`${String(result.exactSettingsMatch)}\``,
   );
   writeSummaryLine(
     `- **Last Error Date**: \`${result.lastErrorDate ?? "none"}\``,
@@ -757,16 +997,26 @@ function printPreflight(result: RenderTelegramPreflightResult): void {
 }
 
 function printApply(result: RenderTelegramApplyResult): void {
-  writeSummaryLine("### Render Telegram Cutover Apply (Explicit)");
+  writeSummaryLine("### Render Telegram Cutover Apply/Reconcile (Explicit)");
   writeSummaryLine(`- **Status**: \`${result.status}\``);
   writeSummaryLine(`- **Code**: \`${result.code}\``);
   writeSummaryLine(`- **Preflight Status**: \`${result.preflight.status}\``);
   writeSummaryLine(
     `- **Webhook URL**: \`${result.webhookUrl ?? "unchanged"}\``,
   );
-  if (result.allowedUpdates) {
+  if (result.observedAllowedUpdates) {
     writeSummaryLine(
-      `- **Allowed Updates**: \`${result.allowedUpdates.join(", ")}\``,
+      `- **Observed Allowed Updates**: \`${result.observedAllowedUpdates.join(", ")}\``,
+    );
+  }
+  if (result.desiredAllowedUpdates) {
+    writeSummaryLine(
+      `- **Desired Allowed Updates**: \`${result.desiredAllowedUpdates.join(", ")}\``,
+    );
+  }
+  if (result.exactSettingsMatch !== undefined) {
+    writeSummaryLine(
+      `- **Exact Settings Match**: \`${String(result.exactSettingsMatch)}\``,
     );
   }
   if (result.webhookSecretHashPersisted !== undefined) {
@@ -789,7 +1039,11 @@ function printApply(result: RenderTelegramApplyResult): void {
 
 async function main(): Promise<void> {
   const operation = (process.env.OPERATION ?? "preflight").trim();
-  if (operation !== "preflight" && operation !== "apply") {
+  if (
+    operation !== "preflight" &&
+    operation !== "apply" &&
+    operation !== "reconcile"
+  ) {
     throw new Error("INVALID_OPERATION");
   }
 
@@ -848,13 +1102,23 @@ async function main(): Promise<void> {
     process.exit(result.status === "BLOCKED" ? 2 : 1);
   }
 
-  const result = await applyRenderTelegramCutover(
-    {
-      ...baseParams,
-      expectedCurrentWebhookUrl: process.env.EXPECTED_CURRENT_WEBHOOK_URL ?? "",
-    },
-    deps,
-  );
+  const actionParams = {
+    ...baseParams,
+    expectedCurrentWebhookUrl: process.env.EXPECTED_CURRENT_WEBHOOK_URL ?? "",
+  };
+  if (operation === "reconcile") {
+    const result = await reconcileRenderTelegramCutover(actionParams, deps);
+    printApply(result);
+    if (
+      result.status === "RECONCILED" ||
+      result.status === "ALREADY_AT_DESTINATION"
+    ) {
+      return;
+    }
+    process.exit(result.status === "BLOCKED" ? 2 : 1);
+  }
+
+  const result = await applyRenderTelegramCutover(actionParams, deps);
   printApply(result);
   if (
     result.status === "SWITCHED" ||

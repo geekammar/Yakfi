@@ -745,6 +745,18 @@ export async function repairTelegramBotWebhookDefault(
 const SWITCH_UUID_REGEX =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
+export function sameStringSet(
+  observed: string[],
+  expected: string[],
+): boolean {
+  const left = [...new Set(observed)].sort();
+  const right = [...new Set(expected)].sort();
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
 export type SwitchTelegramWebhookParams = {
   businessId: string;
   connectionId: string;
@@ -782,6 +794,9 @@ export type SwitchTelegramWebhookOutcome =
       currentWebhookUrl: string;
       destinationWebhookUrl: string;
       allowedUpdates: string[];
+      observedAllowedUpdates?: string[];
+      desiredAllowedUpdates?: string[];
+      exactSettingsMatch?: boolean;
       pendingUpdateCount: number;
       restorationProcedure: string;
       message: string;
@@ -795,6 +810,9 @@ export type SwitchTelegramWebhookOutcome =
       currentWebhookUrl: string;
       destinationWebhookUrl: string;
       allowedUpdates: string[];
+      observedAllowedUpdates?: string[];
+      desiredAllowedUpdates?: string[];
+      exactSettingsMatch?: boolean;
       pendingUpdateCount: number;
       message: string;
     }
@@ -808,6 +826,8 @@ export type SwitchTelegramWebhookOutcome =
       webhookUrl: string;
       allowedUpdates: string[];
       previousAllowedUpdates: string[];
+      desiredAllowedUpdates?: string[];
+      exactSettingsMatch?: boolean;
       pendingUpdateCount: number;
       webhookSecretHashPersisted: true;
       restorationProcedure: string;
@@ -1099,7 +1119,10 @@ export async function switchTelegramBotWebhook(
       botUsername: connection.botUsername,
       currentWebhookUrl: actualCheck.normalizedUrl,
       destinationWebhookUrl: destinationUrlClean,
-      allowedUpdates: targetUpdates,
+      allowedUpdates: currentUpdates,
+      observedAllowedUpdates: currentUpdates,
+      desiredAllowedUpdates: targetUpdates,
+      exactSettingsMatch: sameStringSet(currentUpdates, targetUpdates),
       pendingUpdateCount: info.pending_update_count,
       message:
         "رابط الويبهوك المسجل يطابق الوجهة الثابتة المطلوبة بالفعل. لم يتم إجراء أي تعديل على تيليجرام أو قاعدة البيانات.",
@@ -1127,6 +1150,9 @@ export async function switchTelegramBotWebhook(
       currentWebhookUrl: actualCheck.normalizedUrl,
       destinationWebhookUrl: destinationUrlClean,
       allowedUpdates: targetUpdates,
+      observedAllowedUpdates: currentUpdates,
+      desiredAllowedUpdates: targetUpdates,
+      exactSettingsMatch: sameStringSet(currentUpdates, targetUpdates),
       pendingUpdateCount: info.pending_update_count,
       restorationProcedure: restorationCmd,
       message:
@@ -1377,10 +1403,17 @@ export async function switchTelegramBotWebhook(
     };
   }
 
-  const postUpdates = postInfo.allowed_updates ?? [];
-  const postHasMessage = postUpdates.includes("message");
-  const postHasCallbackQuery = postUpdates.includes("callback_query");
-  if (!postHasMessage || !postHasCallbackQuery) {
+  const postUpdates = Array.isArray(postInfo.allowed_updates)
+    ? postInfo.allowed_updates.filter(
+        (value): value is string => typeof value === "string",
+      )
+    : [];
+  const exactPostRequired = params.allowedUpdates !== undefined;
+  const postMatches = exactPostRequired
+    ? sameStringSet(postUpdates, targetUpdates)
+    : postUpdates.includes("message") &&
+      postUpdates.includes("callback_query");
+  if (!postMatches) {
     return {
       ok: false,
       code: "POST_APPLY_REGISTRATION_MISMATCH",
@@ -1392,7 +1425,7 @@ export async function switchTelegramBotWebhook(
       pendingUpdateCount: postInfo.pending_update_count,
       reconciliationCommand: reconciliationCmd,
       restorationProcedure: restorationCmd,
-      message: `تسجيل تيليجرام بعد التحويل لا يتضمن أنواع التحديثات المطلوبة (${JSON.stringify(postUpdates)}).`,
+      message: `تسجيل تيليجرام بعد التحويل لا يطابق أنواع التحديثات المطلوبة (${JSON.stringify(postUpdates)}).`,
     };
   }
 
@@ -1406,6 +1439,8 @@ export async function switchTelegramBotWebhook(
     webhookUrl: postInfo.url,
     allowedUpdates: postUpdates,
     previousAllowedUpdates: currentUpdates,
+    desiredAllowedUpdates: targetUpdates,
+    exactSettingsMatch: postMatches,
     pendingUpdateCount: postInfo.pending_update_count,
     webhookSecretHashPersisted: true,
     restorationProcedure: restorationCmd,

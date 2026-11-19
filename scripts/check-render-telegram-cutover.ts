@@ -8,6 +8,7 @@ import type { TelegramApiDeps } from "@/server/integrations/telegram/telegram-cl
 import {
   switchTelegramBotWebhook,
   type RepairTelegramWebhookDeps,
+  type SwitchTelegramWebhookParams,
 } from "@/server/integrations/telegram/telegram-repair";
 import type { TelegramConnection } from "@/types/domain";
 
@@ -15,6 +16,7 @@ import {
   RENDER_TELEGRAM_CUTOVER_TARGET,
   applyRenderTelegramCutover,
   preflightRenderTelegramCutover,
+  reconcileRenderTelegramCutover,
   type RenderTelegramCutoverDeps,
   type RenderTelegramPreflightParams,
 } from "./render-telegram-cutover";
@@ -97,6 +99,7 @@ type TelegramFakeOptions = {
   currentUrl?: string;
   pendingUpdateCount?: unknown;
   allowedUpdates?: unknown;
+  postAllowedUpdates?: unknown;
   lastErrorDate?: unknown;
   lastErrorMessage?: unknown;
   me?: Record<string, unknown>;
@@ -105,6 +108,7 @@ type TelegramFakeOptions = {
 
 function createTelegramFake(options: TelegramFakeOptions = {}) {
   let currentUrl = options.currentUrl ?? CURRENT_URL;
+  let postApply = false;
   let setWebhookCount = 0;
   let getWebhookInfoCount = 0;
   let setWebhookBody: Record<string, unknown> | null = null;
@@ -126,13 +130,16 @@ function createTelegramFake(options: TelegramFakeOptions = {}) {
     }
     if (url.endsWith("/getWebhookInfo")) {
       getWebhookInfoCount += 1;
+      const observedAllowedUpdates = postApply
+        ? options.postAllowedUpdates ?? options.allowedUpdates
+        : options.allowedUpdates;
       return new Response(
         JSON.stringify({
           ok: true,
           result: {
             url: currentUrl,
             pending_update_count: options.pendingUpdateCount ?? 0,
-            allowed_updates: options.allowedUpdates ?? [
+            allowed_updates: observedAllowedUpdates ?? [
               "message",
               "callback_query",
             ],
@@ -154,6 +161,7 @@ function createTelegramFake(options: TelegramFakeOptions = {}) {
       }
       if (typeof setWebhookBody.url === "string") {
         currentUrl = setWebhookBody.url;
+        postApply = true;
       }
       return new Response(JSON.stringify({ ok: true, result: true }), {
         status: 200,
@@ -267,6 +275,51 @@ function createDeps(
     getReadinessCalls: () => readinessCalls,
     getVerifyServiceCalls: () => verifyServiceCalls,
   };
+}
+
+async function runRealSwitch(
+  options: {
+    currentUrl?: string;
+    pendingUpdateCount?: unknown;
+    postAllowedUpdates?: unknown;
+    allowedUpdates?: string[];
+    setWebhookThrows?: boolean;
+    repository?: RepairTelegramWebhookDeps["connectionRepository"];
+  } = {},
+) {
+  const telegram = createTelegramFake({
+    currentUrl: options.currentUrl ?? CURRENT_URL,
+    pendingUpdateCount: options.pendingUpdateCount ?? 0,
+    postAllowedUpdates: options.postAllowedUpdates,
+    setWebhookThrows: options.setWebhookThrows,
+  });
+  const repo = options.repository
+    ? { repository: options.repository, getUpdateCount: () => 0 }
+    : createRepo(baseConnection());
+  const params: SwitchTelegramWebhookParams = {
+    businessId: RENDER_TELEGRAM_CUTOVER_TARGET.businessId,
+    connectionId: RENDER_TELEGRAM_CUTOVER_TARGET.connectionId,
+    expectedCurrentUrl: options.currentUrl ?? CURRENT_URL,
+    destinationUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+    expectedBotExternalId: RENDER_TELEGRAM_CUTOVER_TARGET.botExternalId,
+    apply: true,
+    allowAlreadyAtDestination: true,
+    requireZeroPendingUpdates: true,
+    ...(options.allowedUpdates !== undefined
+      ? { allowedUpdates: options.allowedUpdates }
+      : {}),
+  };
+  const result = await switchTelegramBotWebhook(
+    {
+      api: telegram.api,
+      connectionRepository: repo.repository,
+      credentialsResolver: fakeResolver,
+      generateWebhookSecret: () => "candidate-secret",
+      hashWebhookSecret: (secret) => `hash:${secret}`,
+    },
+    params,
+  );
+  return { result, telegram, repo };
 }
 
 const switchedOutcome = {
@@ -638,9 +691,70 @@ async function main(): Promise<void> {
       deps,
     );
     check(
-      "P9. Already-at-destination apply is a read-only no-op without rotation",
+      "P9. Already-at-destination apply reports Telegram-observed settings and is a zero-write no-op",
       apply.status === "ALREADY_AT_DESTINATION" &&
         apply.ok === true &&
+        apply.webhookUrl === RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl &&
+        apply.allowedUpdates?.join(",") === "message,callback_query" &&
+        apply.observedAllowedUpdates?.join(",") === "message,callback_query" &&
+        apply.desiredAllowedUpdates?.join(",") === "message,callback_query" &&
+        apply.exactSettingsMatch === true &&
+        getSwitchCalls() === 0,
+    );
+  }
+
+  // ─── 9b. Matching URL with wrong observed updates is not exact readiness ──
+  {
+    const { deps, getSwitchCalls } = createDeps({
+      telegram: {
+        currentUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+        allowedUpdates: ["message"],
+      },
+    });
+    const preflight = await preflightRenderTelegramCutover(
+      preflightParams(),
+      deps,
+    );
+    const apply = await applyRenderTelegramCutover(
+      {
+        ...preflightParams(),
+        expectedCurrentWebhookUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+      },
+      deps,
+    );
+    check(
+      "P9b. Matching Render URL with missing observed updates is reported as a mismatch and blocks apply",
+      preflight.status === "BLOCKED" &&
+        preflight.code === "ALREADY_AT_DESTINATION_SETTINGS_MISMATCH" &&
+        preflight.exactSettingsMatch === false &&
+        preflight.observedAllowedUpdates.join(",") === "message" &&
+        preflight.desiredAllowedUpdates.join(",") ===
+          "message,callback_query" &&
+        apply.status === "BLOCKED" &&
+        apply.code === "ALREADY_AT_DESTINATION_SETTINGS_MISMATCH" &&
+        getSwitchCalls() === 0,
+    );
+  }
+
+  // ─── 9c. Matching URL with extra observed updates is not exact readiness ──
+  {
+    const { deps, getSwitchCalls } = createDeps({
+      telegram: {
+        currentUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+        allowedUpdates: ["message", "callback_query", "inline_query"],
+      },
+    });
+    const preflight = await preflightRenderTelegramCutover(
+      preflightParams(),
+      deps,
+    );
+    check(
+      "P9c. Matching Render URL with additional observed updates is reported as a mismatch without mutation",
+      preflight.status === "BLOCKED" &&
+        preflight.code === "ALREADY_AT_DESTINATION_SETTINGS_MISMATCH" &&
+        preflight.exactSettingsMatch === false &&
+        preflight.observedAllowedUpdates.join(",") ===
+          "message,callback_query,inline_query" &&
         getSwitchCalls() === 0,
     );
   }
@@ -751,7 +865,11 @@ async function main(): Promise<void> {
         (!("drop_pending_updates" in body) ||
           body.drop_pending_updates === false) &&
         repo.getUpdateCount() === 1 &&
-        result.webhookSecretHashPersisted === true,
+        result.webhookSecretHashPersisted === true &&
+        result.observedAllowedUpdates?.join(",") ===
+          "message,callback_query" &&
+        result.desiredAllowedUpdates?.join(",") === "message,callback_query" &&
+        result.exactSettingsMatch === true,
     );
   }
 
@@ -783,9 +901,14 @@ async function main(): Promise<void> {
       },
     );
     check(
-      "P13. Real switch returns an idempotent no-op when already at the Render destination",
+      "P13. Real switch returns an idempotent no-op with observed settings when already at the Render destination",
       result.ok === true &&
         result.status === "ALREADY_AT_DESTINATION" &&
+        result.allowedUpdates.join(",") === "message,callback_query" &&
+        result.observedAllowedUpdates?.join(",") ===
+          "message,callback_query" &&
+        result.desiredAllowedUpdates?.join(",") === "message,callback_query" &&
+        result.exactSettingsMatch === true &&
         telegram.getSetWebhookCount() === 0 &&
         repo.getUpdateCount() === 0,
     );
@@ -904,6 +1027,203 @@ async function main(): Promise<void> {
         unauthorized.code === "RENDER_CUTOVER_READINESS_UNAUTHORIZED" &&
         wrongOrigin.ok === false &&
         wrongOrigin.code === "INVALID_RENDER_ORIGIN",
+    );
+  }
+
+  // ─── 16. Exact post-apply set verification ───────────────────────────────
+  {
+    const exact = await runRealSwitch({
+      allowedUpdates: ["message", "callback_query"],
+      postAllowedUpdates: ["message", "callback_query"],
+    });
+    const extra = await runRealSwitch({
+      allowedUpdates: ["message", "callback_query"],
+      postAllowedUpdates: ["message", "callback_query", "inline_query"],
+    });
+    const missing = await runRealSwitch({
+      allowedUpdates: ["message", "callback_query"],
+      postAllowedUpdates: ["message"],
+    });
+    const malformed = await runRealSwitch({
+      allowedUpdates: ["message", "callback_query"],
+      postAllowedUpdates: "not-an-array",
+    });
+    const legacy = await runRealSwitch({
+      postAllowedUpdates: ["message", "callback_query", "inline_query"],
+    });
+    check(
+      "P16. Exact post-apply verification rejects extra/missing/malformed sets and preserves legacy merge behavior",
+      exact.result.ok === true &&
+        exact.result.status === "SWITCHED" &&
+        exact.result.exactSettingsMatch === true &&
+        extra.result.ok === false &&
+        extra.result.code === "POST_APPLY_REGISTRATION_MISMATCH" &&
+        extra.telegram.getSetWebhookCount() === 1 &&
+        missing.result.ok === false &&
+        missing.result.code === "POST_APPLY_REGISTRATION_MISMATCH" &&
+        malformed.result.ok === false &&
+        malformed.result.code === "POST_APPLY_REGISTRATION_MISMATCH" &&
+        legacy.result.ok === true &&
+        legacy.result.status === "SWITCHED" &&
+        legacy.telegram.getSetWebhookCount() === 1,
+    );
+  }
+
+  // ─── 17. Successful setWebhook + DB persistence failure is partial ───────
+  {
+    let dbUpdateAttempts = 0;
+    const failingRepo = {
+      findByIdWithinBusiness: async () => baseConnection(),
+      updateWebhookSecretHash: async () => {
+        dbUpdateAttempts += 1;
+        throw new Error("DB_FAIL");
+      },
+      update: async () => {
+        dbUpdateAttempts += 1;
+        throw new Error("DB_FAIL");
+      },
+    } as unknown as RepairTelegramWebhookDeps["connectionRepository"];
+    const { result, telegram } = await runRealSwitch({
+      allowedUpdates: ["message", "callback_query"],
+      repository: failingRepo,
+    });
+    check(
+      "P17. Successful setWebhook followed by DB persistence failure is partial, never false success, and is not retried on Telegram",
+      result.ok === false &&
+        result.status === "PARTIAL_FAILURE" &&
+        result.code === "PARTIAL_APPLICATION_RECOVERY_REQUIRED" &&
+        telegram.getSetWebhookCount() === 1 &&
+        dbUpdateAttempts > 0,
+    );
+  }
+
+  // ─── 18. Explicit reconciliation rotates in place once ──────────────────
+  {
+    const capturedList: SwitchTelegramWebhookParams[] = [];
+    const { deps, getSwitchCalls } = createDeps({
+      telegram: { currentUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl },
+      switchResult: switchedOutcome,
+      onSwitch: (params) => capturedList.push(params),
+    });
+    const result = await reconcileRenderTelegramCutover(
+      {
+        ...preflightParams(),
+        expectedCurrentWebhookUrl:
+          RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+      },
+      deps,
+    );
+    const captured = capturedList[0];
+    check(
+      "P18. Explicit reconciliation requires Render current URL/zero backlog and rotates in place exactly once",
+      result.status === "RECONCILED" &&
+        result.ok === true &&
+        getSwitchCalls() === 1 &&
+        captured !== undefined &&
+        captured.expectedCurrentUrl ===
+          RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl &&
+        captured.destinationUrl ===
+          RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl &&
+        captured.apply === true &&
+        captured.allowAlreadyAtDestination === false &&
+        captured.requireZeroPendingUpdates === true &&
+        captured.allowedUpdates?.join(",") === "message,callback_query",
+    );
+  }
+
+  // ─── 19. Reconciliation guards: current URL and zero backlog ────────────
+  {
+    const wrongUrlDeps = createDeps();
+    const wrongUrl = await reconcileRenderTelegramCutover(
+      {
+        ...preflightParams(),
+        expectedCurrentWebhookUrl:
+          RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+      },
+      wrongUrlDeps.deps,
+    );
+    const pendingDeps = createDeps({
+      telegram: {
+        currentUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+        pendingUpdateCount: 2,
+      },
+    });
+    const pending = await reconcileRenderTelegramCutover(
+      {
+        ...preflightParams(),
+        expectedCurrentWebhookUrl:
+          RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+      },
+      pendingDeps.deps,
+    );
+    check(
+      "P19. Reconciliation blocks a non-Render current URL and any nonzero backlog without mutation",
+      wrongUrl.status === "BLOCKED" &&
+        wrongUrl.code === "RECONCILIATION_REQUIRES_RENDER_CURRENT_URL" &&
+        wrongUrlDeps.getSwitchCalls() === 0 &&
+        pending.status === "BLOCKED" &&
+        pending.code === "PENDING_UPDATES_REQUIRE_DISPOSITION" &&
+        pendingDeps.getSwitchCalls() === 0,
+    );
+  }
+
+  // ─── 20. Reconciliation fixes a matching URL with wrong observed updates ─
+  {
+    const { deps, getSwitchCalls } = createDeps({
+      telegram: {
+        currentUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+        allowedUpdates: ["message"],
+      },
+      switchResult: switchedOutcome,
+    });
+    const result = await reconcileRenderTelegramCutover(
+      {
+        ...preflightParams(),
+        expectedCurrentWebhookUrl:
+          RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+      },
+      deps,
+    );
+    check(
+      "P20. Reconciliation is the explicit corrective operation for a matching URL with wrong observed updates",
+      result.status === "RECONCILED" && result.ok === true && getSwitchCalls() === 1,
+    );
+  }
+
+  // ─── 21. Reconciliation partial failure is never automatically retried ───
+  {
+    const partialOutcome = {
+      ok: false as const,
+      status: "PARTIAL_FAILURE" as const,
+      code: "SET_WEBHOOK_UNCERTAIN_RECOVERY_REQUIRED" as const,
+      botExternalId: RENDER_TELEGRAM_CUTOVER_TARGET.botExternalId,
+      botUsername: RENDER_TELEGRAM_CUTOVER_TARGET.botUsername,
+      webhookUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+      targetAllowedUpdates: [...RENDER_TELEGRAM_CUTOVER_TARGET.allowedUpdates],
+      pendingUpdateCount: 0,
+      reconciliationCommand: "reviewed reconciliation",
+      restorationProcedure: "reviewed restoration",
+      remoteStateMayHaveChanged: true,
+      message: "ambiguous",
+    };
+    const { deps, getSwitchCalls } = createDeps({
+      telegram: { currentUrl: RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl },
+      switchResult: partialOutcome,
+    });
+    const result = await reconcileRenderTelegramCutover(
+      {
+        ...preflightParams(),
+        expectedCurrentWebhookUrl:
+          RENDER_TELEGRAM_CUTOVER_TARGET.webhookUrl,
+      },
+      deps,
+    );
+    check(
+      "P21. Reconciliation partial failure returns no false success and performs no automatic retry",
+      result.status === "PARTIAL_FAILURE" &&
+        result.ok === false &&
+        result.code === "SET_WEBHOOK_UNCERTAIN_RECOVERY_REQUIRED" &&
+        getSwitchCalls() === 1,
     );
   }
 }

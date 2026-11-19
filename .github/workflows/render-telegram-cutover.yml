@@ -11,6 +11,7 @@ on:
         options:
           - preflight
           - apply
+          - reconcile
       expected_checkout_sha:
         description: "Exact reviewed checkout SHA (must equal the dispatched ref HEAD)"
         required: true
@@ -24,7 +25,7 @@ on:
         required: true
         type: string
       expected_current_webhook_url:
-        description: "Required for apply: exact current Telegram webhook URL"
+        description: "Required for apply/reconcile: exact current Telegram webhook URL"
         required: false
         type: string
         default: ""
@@ -69,9 +70,9 @@ jobs:
             echo '::error::expected_version must be a semantic version like 0.79.17.'
             exit 1
           fi
-          if [ "$OPERATION" = "apply" ]; then
+          if [ "$OPERATION" = "apply" ] || [ "$OPERATION" = "reconcile" ]; then
             if ! printf '%s' "$EXPECTED_CURRENT_WEBHOOK_URL" | grep -Eq '^https://[^[:space:]]+/api/telegram/webhook$'; then
-              echo '::error::apply requires the exact current HTTPS /api/telegram/webhook URL.'
+              echo '::error::apply/reconcile requires the exact current HTTPS /api/telegram/webhook URL.'
               exit 1
             fi
           fi
