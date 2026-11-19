@@ -1,0 +1,46 @@
+name: Temp PR93 format
+
+on:
+  push:
+    branches:
+      - fix/yakfi-booking-delivery-transcript
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: "!contains(github.event.head_commit.message, 'chore: format PR93 files')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/yakfi-booking-delivery-transcript
+          fetch-depth: 0
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Format PR93 files
+        run: >-
+          pnpm exec prettier --write
+          scripts/check-telegram-execution-defects.ts
+          src/features/conversations/server/conversation-engine.ts
+          src/features/conversations/server/conversation-refresh.test.tsx
+          src/features/conversations/server/conversation-state.ts
+          src/server/integrations/telegram/telegram-client.ts
+      - name: Commit formatted files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/check-telegram-execution-defects.ts src/features/conversations/server/conversation-engine.ts src/features/conversations/server/conversation-refresh.test.tsx src/features/conversations/server/conversation-state.ts src/server/integrations/telegram/telegram-client.ts
+          git diff --cached --quiet || git commit -m "chore: format PR93 files"
+          git push origin HEAD:fix/yakfi-booking-delivery-transcript
