@@ -413,25 +413,25 @@ async function main(): Promise<void> {
     const harness = createPlaygroundHarness({ channel: "TELEGRAM" });
     harness.deps.ai = ai;
 
-    const startResult = (await receiveInboundMessage(harness.deps, {
-      to: harness.business.whatsappNumber ?? "+201001111111",
-      from: harness.customer.phone,
-      text: "/start",
-      receivedAt: harness.getVirtualNow().toISOString(),
-      externalId: "policy-failure-start",
-    })) as InboundSuccess;
+    const startResult = (await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "6000000000",
+        from: "9988771122",
+        text: "/start",
+        receivedAt: harness.getVirtualNow().toISOString(),
+        externalId: "tg:6000000000:policy-failure-start",
+      },
+      {
+        businessId: harness.business.id,
+        connectionId: null,
+        branchId: harness.business.defaultBranchId,
+      },
+    )) as InboundSuccess;
     const startMessages = harness.messages.filter(
       (message) => message.senderType === "AI",
     );
 
-    console.log("DEBUG 8a", {
-      ok: startResult.ok,
-      action: startResult.assistantAction,
-      status: startResult.conversationStatus,
-      intent: startResult.intent,
-      messages: startMessages.map((message) => message.content),
-      fetchCalls: fetchCalls(),
-    });
     check(
       "8a /start under policy failure stays a protocol reply (no AI, no failure acknowledgment)",
       startResult.ok === true &&
@@ -481,26 +481,25 @@ async function main(): Promise<void> {
       );
     }
 
-    const callbackResult = (await receiveInboundMessage(harness.deps, {
-      to: harness.business.whatsappNumber ?? "+201001111111",
-      from: harness.customer.phone,
-      text: `fp:${offer?.token ?? "missing"}:1`,
-      receivedAt: harness.getVirtualNow().toISOString(),
-      externalId: "policy-failure-valid-callback",
-    })) as InboundSuccess;
+    const callbackResult = (await receiveInboundMessage(
+      harness.deps,
+      {
+        to: "6000000000",
+        from: "9988771122",
+        text: `fp:${offer?.token ?? "missing"}:1`,
+        receivedAt: harness.getVirtualNow().toISOString(),
+        externalId: "tg:6000000000:policy-failure-valid-callback",
+      },
+      {
+        businessId: harness.business.id,
+        connectionId: null,
+        branchId: harness.business.defaultBranchId,
+      },
+    )) as InboundSuccess;
     const callbackMessages = harness.messages.filter(
       (message) => message.senderType === "AI",
     );
 
-    console.log("DEBUG 8b", {
-      offer: offer?.token ?? null,
-      ok: callbackResult.ok,
-      action: callbackResult.assistantAction,
-      status: callbackResult.conversationStatus,
-      writes: harness.capturedAppointmentWrites.length,
-      messages: callbackMessages.map((message) => message.content),
-      fetchCalls: fetchCalls(),
-    });
     check(
       "8b valid offer callback under policy failure stays mechanical and correct",
       offer !== null &&
