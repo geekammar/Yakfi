@@ -325,8 +325,8 @@ Production hosts and reports pre/post `prisma migrate status`.
    - `expected_commit_sha` = that same full 40-char SHA;
    - `expected_db_host` = the exact host of the current
      `PRODUCTION_DATABASE_URL` (operator-supplied, never guessed).
-   Approve the `Production` environment gate. This applies only additive
-   tables/indexes; the currently deployed Render code does not use them.
+     Approve the `Production` environment gate. This applies only additive
+     tables/indexes; the currently deployed Render code does not use them.
 3. Confirm post-migration `Database schema is up to date` and that both PR88
    migration names are recorded. Do not run migration commands on the VPS.
 4. Merge PR88 to `main`. Render auto-deploy (`On Commit`) then deploys the

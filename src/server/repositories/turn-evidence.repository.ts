@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-
 import type { Prisma } from "@/generated/prisma/client";
 
 import type {
@@ -354,9 +353,7 @@ function toEvidenceRecord(row: EvidenceRow): TurnEvidenceRecord {
 }
 
 export class TurnEvidenceRepository {
-  constructor(
-    private readonly options: TurnEvidenceRepositoryOptions = {},
-  ) {}
+  constructor(private readonly options: TurnEvidenceRepositoryOptions = {}) {}
 
   /**
    * Persist ONE finished turn's bounded evidence. Validation and identity
@@ -469,10 +466,9 @@ export class TurnEvidenceRepository {
   async reconcile(input: unknown): Promise<TurnEvidenceReconciliation> {
     const parsed: ReconcileTurnEvidenceDto =
       durableTurnEvidenceValidation.reconcile.parse(input);
-    return db.$transaction(
-      (tx) => this.reconcileSnapshot(tx, parsed),
-      { isolationLevel: "RepeatableRead" },
-    );
+    return db.$transaction((tx) => this.reconcileSnapshot(tx, parsed), {
+      isolationLevel: "RepeatableRead",
+    });
   }
 
   private async reconcileSnapshot(
