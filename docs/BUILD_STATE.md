@@ -1,5 +1,91 @@
 # FlowPilot — Build State
 
+## PR88 reconciliation completeness repair (Draft PR #88) — 20 November 2026
+
+- **Reviewed baseline:** PR88 HEAD `fc7b8bc946c24ccc570f14f5bb21b3ca7a785a50`
+  (`0.79.22`), Draft PR #88 on `main` `9187655` (`0.79.21`).
+- **Reproduced gap:** `TurnEvidenceRepository.reconcile` counted usage rows
+  without evidence and historical rows without `messageId`, but the
+  completeness decision ignored them once `logicalTurns > 0`. Conflicts and
+  contradictory `PROVEN_NO_CALL` + `AI_TURN` linkage were also counted or
+  silently ignored without preventing a complete total. The aggregate queries
+  ran outside a shared snapshot.
+- **Repair:** selected-scope completeness now includes unresolved usage
+  (`withoutEvidence + missingMessageId`), missing evidence beside recorded
+  turns, conflict counters, and contradictory no-call/usage linkage. A
+  complete window total is null until those are resolved; known subtotals stay
+  available. `PARTIAL` means known scoped cost exists but coverage is
+  unresolved; `UNAVAILABLE` means no known scoped cost can justify a total. A
+  genuinely empty selected scope remains `COMPLETE` with zero. Known
+  other-pool links never inflate or block the selected pool. The whole
+  reconciliation runs in one repeatable-read transaction.
+- **New exposed facts:** `evidence.conflictedTurns`,
+  `usage.aiTurnLinks.noCallWithAiTurn`, `usage.unresolvedUsageRows`, and
+  `usage.knownOtherPoolLinks` (replacing the ambiguous
+  `unclassifiedOtherPool`). Original evidence/attempt rows and conflict
+  counters are never replaced or resolved automatically.
+- **Tests:** focused disposable-PostgreSQL cases now cover complete + unlinked
+  `AI_TURN`, complete + identityless usage, unresolved-usage-only, genuine
+  empty scope, TEST evidence while querying SERVING, conflicting replay,
+  contradictory no-call/usage, cross-window ID linkage, complete/partial/
+  unknown/real-zero status, and a controlled concurrent insert proving the
+  repeatable-read snapshot.
+- **Rollout:** exact migration/deployment order is documented in
+  `docs/RELEASE_PROCESS.md`; the approved mechanism is
+  `.github/workflows/production-db-migrate.yml` with exact
+  `expected_db_host` + `expected_commit_sha`. Migrations must be applied
+  before the Render auto-deploy of the code.
+- **Not done:** no merge, deploy, production migration, paid AI call,
+  Telegram/customer send, billing/pricing change or historical backfill.
+  Required CI on the final PR HEAD is the verification authority.
+
+## Durable usage/cost evidence refresh on PR #95 boundary (Draft PR #88, v0.79.22) — 19 November 2026
+
+- **Baseline verified:** PR #95 is merged as
+  `9187655ae9909326d8243eccffc11c2f160bcabb` (`0.79.21`); current `main` is
+  that merge. Read-only Render checks at `2026-11-19T23:31Z` still reported the
+  prior deployment `fdf8e56` / `0.79.20` with `/api/health/live` and
+  `/api/health` HTTP `200`, `deploymentReady=true`, `database=connected`,
+  `missingEnvVars=[]`; the `0.79.21` deployment was **pending** then and was
+  not triggered manually. At `2026-11-19T23:37Z` automation completed: both
+  health endpoints reported version `0.79.21`, exact commit `9187655`, HTTP
+  `200`, `deploymentReady=true`, `database=connected`,
+  `missingEnvVars=[]`.
+- **PR #88 recovered, not recreated:** branch
+  `feat/durable-turn-usage-cost-evidence` was merged with current `main`
+  non-destructively (no reset/force-push). The existing Draft PR remains the
+  delivery vehicle. Package version is `0.79.22` for the version gate.
+- **One execution boundary:** PR88 no longer adds `respondTurn`, a
+  module-level last-telemetry value or any second execution wrapper. The
+  merged PR #95 stateless `respondWithExecution` result (response, provider,
+  telemetry, `policyUnavailable`, error) is the single source for routing,
+  counters, usage, attribution and durable evidence.
+- **Policy no-call vs unknown execution:** policy-unavailable is propagated as
+  an explicit request-scoped marker into turn evidence. Durable evidence maps
+  it to `PROVEN_NO_CALL` with zero attempts; missing telemetry without that
+  proof remains `UNAVAILABLE`. Deterministic/JEV/deferred no-call proofs are
+  unchanged. `/start`, valid callbacks and valid-policy provider failures are
+  not reclassified.
+- **Preserved PR88 scope:** additive `turn_evidence_records` /
+  `turn_evidence_attempts`; explicit `trafficPool` (`SERVING` for production
+  routes, `TEST` for the isolated test ingress); exact full-window read-only
+  reconciliation; separate confirmed/unknown/prevented dispatch counts;
+  provider-reported cost copied from the existing projection; no historical
+  backfill, no second cost engine, no billing/entitlement change.
+- **Tests:** existing `check:durable-turn-evidence`,
+  `check:request-scoped-usage` and the disposable-PostgreSQL
+  `test:turn-evidence-durable-db` suite are retained. `check:request-scoped-usage`
+  now targets `respondWithExecution` and adds a policy-failure no-call case;
+  the focused durable-evidence tests add PR95 policy no-call and actual-call
+  cases.
+- **Migrations:** PR88's two additive migrations remain unapplied. Migration
+  validation is authorized only in the disposable PostgreSQL CI service;
+  no VPS, production or runtime database command was executed.
+- **Explicit limits:** no merge, deploy, production migration, paid AI call or
+  Telegram/customer send. Crash-before-turn-completion, invoice reconciliation
+  and a global enforceable spend cap remain open. Required CI on the final PR
+  HEAD is the verification authority.
+
 ## AI policy-resolution failure must fail closed (Draft PR, v0.79.21) — 19 November 2026
 
 - Baseline verified: `main` `fdf8e56dad5c7bc4e5ff1f35968dd61b4ade5a6b`

@@ -85,6 +85,13 @@ export type TurnEvidence = {
   readonly model: string | null;
   readonly providerAttempts: number | null;
   readonly providerStatus: string | null;
+  /**
+   * Explicit request-scoped proof that policy resolution failed before any
+   * provider/JEV dispatch. Distinct from a deterministic bypass and from
+   * unknown execution evidence; the durable projection turns ONLY this
+   * marker into `PROVEN_NO_CALL` for the policy-failure path.
+   */
+  readonly policyUnavailable: boolean;
   readonly providerLatencyMs: number | null;
   /**
    * Input tokens the provider reported for this turn (PROMPT-AI-PERF-02): the
@@ -305,6 +312,7 @@ export function buildTurnEvidence(
     providerAttempts: observability?.providerAttempts ?? null,
     providerStatus:
       observability?.providerStatus ?? (notCalled ? "NOT_CALLED" : null),
+    policyUnavailable: observability?.policyUnavailable === true,
     providerLatencyMs: observability?.latencyMs ?? null,
     // PROMPT-AI-PERF-02 — the ONE token projection onto the evidence record:
     // pure pass-through of the counter the engine already copied from the

@@ -52,6 +52,7 @@ export const telegramTransport = createTelegramMessageTransport();
 export const telegramEngineDeps = {
   ...defaultConversationEngineDeps,
   transport: telegramTransport,
+  trafficPool: "SERVING" as const,
 };
 
 export const defaultTelegramWebhookLogger = createSafeTelegramWebhookLogger();

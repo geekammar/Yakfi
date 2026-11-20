@@ -170,6 +170,7 @@ model Business {
   providerProfiles                 ProviderProfile[]
   inboundDedupe                    InboundMessageDedupe[]
   usageRecords                     UsageRecord[]
+  turnEvidenceRecords              TurnEvidenceRecord[]
   operatorAttentions               OperatorAttention[]
   knowledgeGaps                    KnowledgeGap[]
   conversationStates               ConversationStateRecord[]
@@ -309,6 +310,7 @@ model Conversation {
   messages         Message[]
   attention        OperatorAttention?
   knowledgeGaps    KnowledgeGap[]
+  turnEvidenceRecords TurnEvidenceRecord[]
   stateRecord      ConversationStateRecord?
   deliveryRoute    ConversationDeliveryRoute?
   replySubmissions StaffReplySubmission[]
@@ -1026,6 +1028,90 @@ model UsageRecord {
   @@index([businessId, kind, occurredAt])
   @@index([conversationId])
   @@map("usage_records")
+}
+
+// ─── Durable turn usage/cost evidence ────────────────────────
+// Bounded, content-free projection of the finished-turn evidence record.
+// The authoritative inbound `customerMessageId` is the replay identity
+// (tenant-scoped); a replay never duplicates accounting, and conflicting
+// facts are flagged instead of replacing history. Costs are IEEE-754 USD
+// doubles copied from the EXISTING cost engine — never estimated here.
+model TurnEvidenceRecord {
+  id                        String    @id @default(uuid())
+  schemaVersion             String    @map("schema_version")
+  businessId                String    @map("business_id")
+  conversationId            String    @map("conversation_id")
+  customerMessageId         String    @map("customer_message_id")
+  traceId                   String?   @map("trace_id")
+  trafficPool               String    @map("traffic_pool")
+  executionEvidence         String    @map("execution_evidence")
+  occurredAt                DateTime  @map("occurred_at")
+  appVersion                String    @map("app_version")
+  environment               String
+  intent                    String?
+  assistantAction           String    @map("assistant_action")
+  conversationStatus        String    @map("conversation_status")
+  handoffCause              String?   @map("handoff_cause")
+  routingDecision           String?   @map("routing_decision")
+  provider                  String?
+  model                     String?
+  providerStatus            String?   @map("provider_status")
+  stopReason                String?   @map("stop_reason")
+  finalOutcome              String    @map("final_outcome")
+  outboundSendAttempted     Boolean   @map("outbound_send_attempted")
+  outboundSendDelivered     Boolean?  @map("outbound_send_delivered")
+  outboundDeliveryErrorCode String?   @map("outbound_delivery_error_code")
+  totalCostUsd              Float?    @map("total_cost_usd")
+  knownCostSubtotalUsd      Float?    @map("known_cost_subtotal_usd")
+  costCompleteness          String?   @map("cost_completeness")
+  costCurrency              String?   @map("cost_currency")
+  logicalAttemptCount       Int       @default(0) @map("logical_attempt_count")
+  confirmedHttpDispatches   Int       @default(0) @map("confirmed_http_dispatches")
+  unknownDispatchAttemptCount Int     @default(0) @map("unknown_dispatch_attempt_count")
+  preventedAttemptCount     Int       @default(0) @map("prevented_attempt_count")
+  factFingerprint           String    @map("fact_fingerprint")
+  replayCount               Int       @default(0) @map("replay_count")
+  conflictCount             Int       @default(0) @map("conflict_count")
+  lastConflictAt            DateTime? @map("last_conflict_at")
+  createdAt                 DateTime  @default(now()) @map("created_at")
+
+  business     Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  conversation Conversation       @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  attempts     TurnEvidenceAttempt[]
+
+  @@unique([businessId, customerMessageId])
+  @@index([businessId, occurredAt])
+  @@index([conversationId, occurredAt])
+  @@index([businessId, conversationId, occurredAt])
+  @@index([businessId, trafficPool, occurredAt])
+  @@map("turn_evidence_records")
+}
+
+model TurnEvidenceAttempt {
+  id               String  @id @default(uuid())
+  turnEvidenceId   String  @map("turn_evidence_id")
+  attemptIndex     Int     @map("attempt_index")
+  attemptIdentity  String  @map("attempt_identity")
+  provider         String
+  model            String?
+  status           String
+  dispatchState    String  @map("dispatch_state")
+  httpAttempts     Int?    @map("http_attempts")
+  inputTokens      Int?    @map("input_tokens")
+  outputTokens     Int?    @map("output_tokens")
+  costUsd          Float?  @map("cost_usd")
+  costCurrency     String? @map("cost_currency")
+  costProvenance   String  @map("cost_provenance")
+  costCompleteness String  @map("cost_completeness")
+  errorCode        String? @map("error_code")
+  httpStatus       Int?    @map("http_status")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  turnEvidence TurnEvidenceRecord @relation(fields: [turnEvidenceId], references: [id], onDelete: Cascade)
+
+  @@unique([turnEvidenceId, attemptIndex])
+  @@index([turnEvidenceId])
+  @@map("turn_evidence_attempts")
 }
 
 // ─── Invitations ─────────────────────────────────────────────

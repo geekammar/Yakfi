@@ -1,6 +1,6 @@
 {
   "name": "flowpilot",
-  "version": "0.79.21",
+  "version": "0.79.22",
   "private": true,
   "scripts": {
     "setup": "node scripts/setup-env.mjs && pnpm install && pnpm db:generate && node scripts/install-git-hooks.mjs",
@@ -76,6 +76,8 @@
     "check:semantic-authority-repair": "tsx scripts/check-semantic-authority-repair.ts",
     "check:knowledge-gap": "tsx scripts/check-knowledge-gap.ts",
     "check:turn-evidence": "tsx scripts/check-turn-evidence.ts",
+    "check:durable-turn-evidence": "tsx scripts/check-durable-turn-evidence.ts",
+    "check:request-scoped-usage": "tsx scripts/check-request-scoped-usage.ts",
     "check:economics-contract": "tsx scripts/check-economics-contract.ts",
     "check:jev": "tsx scripts/check-jev-strategy.ts",
     "check:jev-semantic": "tsx scripts/check-jev-semantic.ts",
@@ -218,6 +220,7 @@
     "test:appointment-cancel": "vitest run --config vitest.config.ts src/features/appointments/components/appointment-cancel-dialog.test.tsx",
     "test:appointment-duration": "vitest run --config vitest.config.ts src/features/appointments/components/appointment-duration.test.tsx",
     "test:appointment-actions-db": "vitest run --config vitest.config.ts src/features/appointments/actions/appointment-actions-isolation.test.tsx",
+    "test:turn-evidence-durable-db": "vitest run --config vitest.config.ts src/features/conversations/server/turn-evidence-durable.test.tsx",
     "test:login-form": "vitest run --config vitest.config.ts src/features/auth/components/login-form.test.tsx",
     "test:sign-in-page": "vitest run --config vitest.config.ts 'src/app/(auth)/sign-in/page.test.tsx'",
     "test:follow-up-scheduling": "vitest run --config vitest.config.ts src/features/appointments/components/follow-up-scheduling.test.tsx",

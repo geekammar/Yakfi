@@ -2,34 +2,83 @@
 
 > **Tier 0 orientation snapshot — as of 19 November 2026.** Read with
 > `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0D records the
-> merged PR #94 deployment verification and the AI policy fail-closed
-> candidate; Section 0 retains live Render readiness and the cutover tooling
-> candidate; 00/0A/0B and Sections 1–9 retain all prior release, R5, R6, Y83
-> and QA249/QA250 evidence unchanged. The Render app is technically ready;
-> Telegram cutover and live product acceptance have not been performed; PR88
-> remains open.
+> merged PR #95 request-scoped policy-failure boundary and the read-only Render
+> observation. Section 0E records the refreshed Draft PR #88 durable-evidence
+> candidate. Sections 0/00/0A/0B and 1–9 retain prior release, R5, R6, Y83 and
+> QA249/QA250 evidence unchanged. The Render app is technically ready;
+> Telegram cutover and live product acceptance have not been performed.
 
-## 0D. AI policy fail-closed candidate — 19 November 2026
+## 0D. PR #95 merged: request-scoped policy fail-closed — 19 November 2026
 
-- **PR #94 is merged:** merge commit
-  `fdf8e56dad5c7bc4e5ff1f35968dd61b4ade5a6b` (`0.79.20`), merged at
-  `2026-11-19T21:04:08Z`. Read-only Render verification at `21:07Z`:
-  `/api/health/live` and `/api/health` HTTP `200`, exact commit
-  `fdf8e56`, version `0.79.20`, `environment=production`,
-  `deploymentReady=true`, `database=connected`, `missingEnvVars=[]`.
-  This is deployment/readiness evidence, not live product acceptance.
-- **Draft candidate `0.79.21`:** `createPolicyBackedAi` no longer returns the
-  lexical `deterministicConversationAi` when policy resolution fails. A read
-  throw, persistence failure or invalid stored policy returns a bounded
-  `policy-unavailable` assistant that enters the existing
-  `AI_FAILURE` / `NEED_HUMAN` safe path with zero provider/JEV calls and no
-  booking mutation. The policy wrapper is stateless: response, provider,
-  telemetry and the explicit no-call marker are request-scoped, so concurrent
-  turns cannot exchange evidence. Valid-policy, real provider-failure,
-  `/start` and valid callback behavior are preserved.
-- **Not claimed:** no merge, deploy, production DB access, migration,
-  Telegram/customer send or paid AI call. Required CI on the PR HEAD is the
-  verification authority. PR #88 remains separate and untouched.
+- **PR #95 is merged:** merge commit
+  `9187655ae9909326d8243eccffc11c2f160bcabb`, package `0.79.21`, merged at
+  `2026-11-19T23:30:54Z`; `origin/main` is that merge. The old PR #95 branch
+  head was `26a5e6c`.
+- **Merged behavior:** policy read/persistence/invalid failure returns a
+  bounded `policy-unavailable` assistant that enters the existing
+  `AI_FAILURE` / `NEED_HUMAN` path with zero provider/JEV calls, no booking
+  mutation and no lexical fallback. The production policy wrapper is
+  stateless; `ConversationAi.respondWithExecution` returns response, provider,
+  telemetry and an explicit `policyUnavailable` marker from the same
+  invocation. Valid-policy, real provider-failure, `/start` and valid callback
+  behavior are preserved.
+- **Read-only Render verification:** at `2026-11-19T23:31Z` the service still
+  reported the prior `0.79.20` / `fdf8e56` deployment (HTTP `200`,
+  `deploymentReady=true`, `database=connected`, `missingEnvVars=[]`), so the
+  `0.79.21` deployment was pending and was not triggered manually. At
+  `2026-11-19T23:37Z` the automatic deployment had completed: both
+  `/api/health/live` and `/api/health` returned HTTP `200` with version
+  `0.79.21`, exact commit `9187655ae9909326d8243eccffc11c2f160bcabb`,
+  environment `production`, `deploymentReady=true`, `database=connected`,
+  `missingEnvVars=[]`. This is deployment/readiness evidence, not live product
+  acceptance.
+- **Not claimed:** no deploy, production DB access, migration,
+  Telegram/customer send or paid AI call.
+
+## 0E. Refreshed PR #88 durable evidence candidate — 20 November 2026
+
+- **Branch/PR preserved:** existing branch
+  `feat/durable-turn-usage-cost-evidence` and Draft PR #88 remain the delivery
+  vehicle. Reviewed refresh HEAD was
+  `fc7b8bc946c24ccc570f14f5bb21b3ca7a785a50` on `main` (`9187655`,
+  `0.79.21`); package version is `0.79.22`. The branch has no reset,
+  force-push or history rewrite.
+- **One execution boundary:** PR88's earlier `respondTurn` wrapper and
+  module-level last-telemetry plumbing were removed. Routing, physical/logical
+  counters, usage rows, provider attribution and durable evidence now consume
+  the merged PR #95 `respondWithExecution` result. There is no second
+  execution-accounting path and no shared "last provider/telemetry" state.
+- **Policy no-call vs unknown execution:** the explicit request-scoped
+  `policyUnavailable` marker is projected into turn evidence and maps to
+  `executionEvidence=PROVEN_NO_CALL` with zero attempts. Missing telemetry
+  without that marker remains `UNAVAILABLE`; it is never presented as a
+  proven no-call. Deterministic/JEV/deferred proofs and valid-policy provider
+  failures keep their existing meaning.
+- **Bounded economics preserved:** additive `turn_evidence_records` /
+  `turn_evidence_attempts`; explicit `trafficPool` (`SERVING` production
+  routes, `TEST` isolated test ingress); separate confirmed HTTP, unknown
+  dispatch and prevented counts; provider-reported cost and attempt identity
+  copied from the existing projection; null/unknown stays distinct from a real
+  zero or complete total. No historical backfill, second cost engine, billing
+  or entitlement change.
+- **Reconciliation completeness repair:** the read-only reconciliation now
+  runs in one repeatable-read snapshot and blocks a complete window total
+  while selected-scope usage lacks evidence, historical usage lacks
+  `messageId`, evidence has unresolved execution, conflict counters exist, or
+  `PROVEN_NO_CALL` contradicts an `AI_TURN` row. Known subtotals remain
+  available; `PARTIAL` and `UNAVAILABLE` are distinct; a genuinely empty
+  selected scope remains complete with zero; known other-pool links never
+  inflate or block the selected pool. Conflicts are exposed and never resolved
+  automatically. Exact migration-before-deploy ordering is in
+  `docs/RELEASE_PROCESS.md`.
+- **Migrations:** `20261116120000_durable_turn_evidence` and
+  `20261116210000_durable_turn_evidence_execution_scope` are additive and
+  remain unapplied. Validation runs only against the disposable PostgreSQL CI
+  service; no production/runtime database command is authorized.
+- **Limits:** no merge, deploy, production migration, paid AI call or
+  Telegram/customer send. Crash-before-turn-completion, invoice reconciliation
+  and a global enforceable spend cap remain open. Required CI on the final PR
+  HEAD is the verification authority.
 
 ## 0C. Booking/delivery/transcript repair candidate — 19 November 2026
 

@@ -131,6 +131,10 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
 | 114 | AI policy-resolution failure fails closed: bounded `policy-unavailable` assistant enters existing `AI_FAILURE` / `NEED_HUMAN` path with zero provider/JEV calls, no lexical fallback, truthful zero-call evidence | policy read/persistence/invalid failure, AI failure evidence, safe handoff | [#114](DECISIONS.md) |
 | 115 | Request-scoped policy-failure evidence: stateless policy wrapper + optional `respondWithExecution` result; no shared last provider/telemetry; explicit no-call marker; unknown evidence never forced to zero | concurrent AI turns, policy failure attribution/counters/usage | [#115](DECISIONS.md) |
 
+| 116 | Durable turn usage/cost evidence: bounded content-free projection, stable message identity, replay/conflict semantics, explicit pools, read-only reconciliation | turn cost evidence/persistence/reconciliation | [#116](DECISIONS.md) |
+| 117 | PR88 repair: request-scoped execution reuse, required pool scope, exact full-window reconciliation, execution-proof/dispatch honesty | durable evidence concurrency/pools/reconciliation/unknown execution | [#117](DECISIONS.md) |
+| 118 | PR88 reconciliation completeness: unresolved usage/identity/conflicts/contradictory no-call block complete totals; known subtotals remain; repeatable-read snapshot; known other-pool links excluded | durable evidence reconciliation/completeness/conflicts/snapshot | [#118](DECISIONS.md) |
+
 ## Historical decisions (never load unless doing forensics)
 
 <!-- prettier-ignore -->
@@ -157,3 +161,10 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
 - Decision #112 is a draft repair (v0.79.19) for inherited booking temporal
   freshness, bounded outbound delivery diagnostics/visibility, and staff reply
   transcript identity. It is not merged, deployed or live-retested.
+- Decisions #116/#117 are the refreshed draft PR #88 candidate
+  (`v0.79.22`) on top of PR #95's merged `0.79.21` / `9187655`. The durable
+  evidence path reuses the merged request-scoped `respondWithExecution`
+  boundary; it does not introduce a second execution wrapper or shared
+  last-provider/telemetry state. Decision #118 repairs reconciliation
+  completeness/conflict/snapshot semantics. The additive migrations remain
+  unapplied and no merge, deploy or production migration is claimed.

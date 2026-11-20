@@ -210,6 +210,8 @@ async function main(): Promise<void> {
 
     const mockEngineDeps = {
       ...defaultConversationEngineDeps,
+      // Offline harness: no durable DB write is attempted.
+      turnEvidenceRepository: undefined,
       serviceRepository: {
         listByBusiness: async () => [],
         listActiveByBusiness: async () => [],
@@ -475,6 +477,8 @@ async function main(): Promise<void> {
 
     const shadowEngineDeps = {
       ...defaultConversationEngineDeps,
+      // Offline harness: no durable DB write is attempted.
+      turnEvidenceRepository: undefined,
       serviceRepository: {
         listByBusiness: async () => [],
         listActiveByBusiness: async () => [],

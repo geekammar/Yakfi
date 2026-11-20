@@ -132,9 +132,94 @@ Pure per-attempt physical execution accounting:
 - **Coverage Denominator:** Coverage ratio reflects known dispatched attempts divided by total dispatched wire attempts. Zero denominator yields null (`N/A`).
 - **Content-Free Output Projection:** All attempt results and pool summaries are projected through allowlists to strip caller properties.
 
-### 3. Persistence Caveats & Architectural Gaps (Under Review)
+### 3. Durable per-turn evidence (implemented, bounded)
 
-The proposed persistence schema is a discovery design proposal and is **NOT approved or implemented**:
+`flowpilot.turn.evidence.durable@v1` persists a **small, content-free
+projection** of the existing finished-turn evidence. It reuses the existing
+cost result and attempt projections — it is NOT a second cost engine, a
+billing ledger or an invoice system.
+
+- **Tables:** `turn_evidence_records` (one row per finished turn) and
+  `turn_evidence_attempts` (bounded, max 16 per turn). Migrations
+  `20261116120000_durable_turn_evidence` and
+  `20261116210000_durable_turn_evidence_execution_scope` are additive and
+  leave historical `usage_records` untouched.
+- **Identity:** `(businessId, customerMessageId)` is the stable replay key.
+  New `AI_TURN` usage rows carry the same `messageId`. A turn never uses
+  message text, a timestamp alone, or provider/model names as identity.
+- **Replay/conflict:** an identical replay is idempotent (`replayCount`); a
+  replay with different substantive facts increments `conflictCount` and
+  leaves the historical row/attempts unchanged. It is never silently replaced.
+- **Execution evidence:** `executionEvidence` is `RECORDED` when attempt
+  records exist, `PROVEN_NO_CALL` only for an authoritative deterministic/
+  deferred no-call, and `UNAVAILABLE` whenever absence of telemetry cannot
+  prove that no model call occurred. Counts keep logical attempt records,
+  confirmed HTTP dispatches, unknown dispatch quantities and proven local
+  prevention separate.
+- **Dispatch honesty:** an attempt with missing `httpAttempts` is `UNKNOWN`,
+  never `DISPATCHED`. A proven local prevention is `PREVENTED` with a real
+  zero USD cost and `ZERO_DISPATCH_PREVENTED` provenance. Cost is propagated
+  only from the existing explicit provider-reported projection; a cost value
+  without that provenance is not re-labelled.
+- **Cost fields:** `totalCostUsd`, `knownCostSubtotalUsd`,
+  `costCompleteness` and per-attempt `costUsd`/`costCurrency`/provenance are
+  copied from the existing projection. USD values are IEEE-754 doubles in
+  `DOUBLE PRECISION` columns, so sub-micro costs are not rounded to integer
+  micro-units. Null (unknown/not applicable) is distinct from a real `0`.
+- **Completeness rule:** a mixed known/unknown dispatched attempt set is
+  `PARTIAL` and MUST have `totalCostUsd = null`; the known subtotal remains
+  separate. Prevented attempts are excluded from the dispatched completeness
+  denominator. A proven no-call turn has zero attempts, a null completeness
+  and no fabricated cost.
+- **Pool separation:** `trafficPool` is explicit (`SERVING` / `TEST`);
+  dedicated test ingress writes `TEST`, production entry points write
+  `SERVING`. Shadow evaluations are a side-channel and never become serving
+  attempts or paid turn rows. Reconciliation REQUIRES one explicit pool;
+  TEST/SHADOW never inflate SERVING evidence/cost metrics.
+- **Request-scoped execution boundary:** the production policy-backed
+  assistant returns response, provider identity, telemetry and the explicit
+  `policyUnavailable` marker from the same request-scoped invocation through
+  `respondWithExecution`. No module-level "last telemetry" value or second
+  execution-accounting path is used, including failure paths. A policy
+  no-call is evidence `PROVEN_NO_CALL`; missing telemetry without that explicit
+  marker remains `UNAVAILABLE`.
+- **Failure isolation:** persistence is awaited in the existing request
+  lifecycle AFTER the customer outcome is complete. A storage failure is
+  caught, emits a sanitized `flowpilot.turn.evidence.durable.failed` signal,
+  and cannot resend a reply, rerun AI, recreate a booking or alter the turn.
+  The existing fail-open log/OTLP emission is preserved.
+- **Read-only reconciliation:** `TurnEvidenceRepository.reconcile(...)` is
+  EXACT over the FULL requested tenant/conversation/≤31-day window, requires
+  an explicit pool, and reads every aggregate inside one repeatable-read
+  transaction so the result is a consistent snapshot. Historical rows are
+  never guessed into a pool. Provider-reported cost is explicitly separated
+  from invoice reconciliation, which is `NOT_PERFORMED`. It separates:
+  - scoped evidence aggregates (cost, completeness, execution proof, counts);
+  - window usage counts, which are NOT pool totals because `usage_records`
+    has no pool column;
+  - AI_TURN links classified by authoritative IDs (`linkedScoped`,
+    `linkedOtherPool`, `withoutEvidence`, `missingMessageId`);
+  - evidence without AI_TURN split into expected proven no-call vs unresolved;
+  - unresolved historical identity (no `messageId`) vs new missing evidence.
+- **Coverage completeness (binding):** `scopedWindowTotalCostUsd` is emitted
+  only when the selected window is actually complete. A complete total is
+  null while any of these remain in the selected scope:
+  - `AI_TURN` rows with no evidence (`withoutEvidence`);
+  - historical `AI_TURN` rows without `messageId`;
+  - evidence whose execution is unresolved;
+  - evidence carrying conflict counters;
+  - contradictory `PROVEN_NO_CALL` evidence with an `AI_TURN` row.
+    `unresolvedUsageRows` is `withoutEvidence + missingMessageId` and drives the
+    selected-scope status. Known other-pool links are excluded and never become
+    selected-pool activity or missing evidence. A genuinely empty selected scope
+    is `COMPLETE` with zero; unresolved usage is not proof of emptiness.
+    `PARTIAL` means some known scoped cost exists but coverage is unresolved;
+    `UNAVAILABLE` means no known scoped cost can justify a total. Known subtotals
+    (`knownCostSubtotalUsd`, `completeTurnTotalUsd`) remain available even when
+    the complete window total is null. Conflicts and contradictory no-call/usage
+    evidence expose their counters and never replace or resolve historical rows.
+
+### 4. Persistence Caveats & Architectural Gaps (Under Review)
 
 - **Independent Handoff Evidence Integrity:** Handoff regression suites (`scripts/check-handoff-cause.ts`) independently verify conversation-engine handoff causes: E10 validates inactive-service / `TENANT_CONFIGURATION` behavior, and E12b validates deterministic sensitive-handoff precedence over model `HUMAN_REQUEST` claims (`SENSITIVE_OR_RESTRICTED`). These are conversation control and safety rules, not economics cost or retry-lineage tests, and their expected outcomes remain untouched.
 - **Finished-Only Crash Gaps:** In-flight network attempts that crash the process before turn completion are missing from finished-turn logs.
