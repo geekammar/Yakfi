@@ -204,11 +204,11 @@ billing ledger or an invoice system.
 - **Coverage completeness (binding):** `scopedWindowTotalCostUsd` is emitted
   only when the selected window is actually complete. A complete total is
   null while any of these remain in the selected scope:
-    - `AI_TURN` rows with no evidence (`withoutEvidence`);
-    - historical `AI_TURN` rows without `messageId`;
-    - evidence whose execution is unresolved;
-    - evidence carrying conflict counters;
-    - contradictory `PROVEN_NO_CALL` evidence with an `AI_TURN` row.
+  - `AI_TURN` rows with no evidence (`withoutEvidence`);
+  - historical `AI_TURN` rows without `messageId`;
+  - evidence whose execution is unresolved;
+  - evidence carrying conflict counters;
+  - contradictory `PROVEN_NO_CALL` evidence with an `AI_TURN` row.
     `unresolvedUsageRows` is `withoutEvidence + missingMessageId` and drives the
     selected-scope status. Known other-pool links are excluded and never become
     selected-pool activity or missing evidence. A genuinely empty selected scope
