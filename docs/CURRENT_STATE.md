@@ -35,13 +35,14 @@
 - **Not claimed:** no deploy, production DB access, migration,
   Telegram/customer send or paid AI call.
 
-## 0E. Refreshed PR #88 durable evidence candidate — 19 November 2026
+## 0E. Refreshed PR #88 durable evidence candidate — 20 November 2026
 
 - **Branch/PR preserved:** existing branch
   `feat/durable-turn-usage-cost-evidence` and Draft PR #88 remain the delivery
-  vehicle. Current `main` (`9187655`, `0.79.21`) was merged in
-  non-destructively; there was no reset, force-push or history rewrite.
-  Package version is `0.79.22`.
+  vehicle. Reviewed refresh HEAD was
+  `fc7b8bc946c24ccc570f14f5bb21b3ca7a785a50` on `main` (`9187655`,
+  `0.79.21`); package version is `0.79.22`. The branch has no reset,
+  force-push or history rewrite.
 - **One execution boundary:** PR88's earlier `respondTurn` wrapper and
   module-level last-telemetry plumbing were removed. Routing, physical/logical
   counters, usage rows, provider attribution and durable evidence now consume
@@ -55,11 +56,21 @@
   failures keep their existing meaning.
 - **Bounded economics preserved:** additive `turn_evidence_records` /
   `turn_evidence_attempts`; explicit `trafficPool` (`SERVING` production
-  routes, `TEST` isolated test ingress); read-only exact full-window
-  reconciliation; separate confirmed HTTP, unknown dispatch and prevented
-  counts; provider-reported cost and attempt identity copied from the existing
-  projection; null/unknown stays distinct from a real zero or complete total.
-  No historical backfill, second cost engine, billing or entitlement change.
+  routes, `TEST` isolated test ingress); separate confirmed HTTP, unknown
+  dispatch and prevented counts; provider-reported cost and attempt identity
+  copied from the existing projection; null/unknown stays distinct from a real
+  zero or complete total. No historical backfill, second cost engine, billing
+  or entitlement change.
+- **Reconciliation completeness repair:** the read-only reconciliation now
+  runs in one repeatable-read snapshot and blocks a complete window total
+  while selected-scope usage lacks evidence, historical usage lacks
+  `messageId`, evidence has unresolved execution, conflict counters exist, or
+  `PROVEN_NO_CALL` contradicts an `AI_TURN` row. Known subtotals remain
+  available; `PARTIAL` and `UNAVAILABLE` are distinct; a genuinely empty
+  selected scope remains complete with zero; known other-pool links never
+  inflate or block the selected pool. Conflicts are exposed and never resolved
+  automatically. Exact migration-before-deploy ordering is in
+  `docs/RELEASE_PROCESS.md`.
 - **Migrations:** `20261116120000_durable_turn_evidence` and
   `20261116210000_durable_turn_evidence_execution_scope` are additive and
   remain unapplied. Validation runs only against the disposable PostgreSQL CI

@@ -189,11 +189,11 @@ billing ledger or an invoice system.
   and cannot resend a reply, rerun AI, recreate a booking or alter the turn.
   The existing fail-open log/OTLP emission is preserved.
 - **Read-only reconciliation:** `TurnEvidenceRepository.reconcile(...)` is
-  EXACT over the FULL requested tenant/conversation/≤31-day window and
-  requires an explicit pool. `scopedWindowTotalCostUsd` is non-null only when
-  every scoped turn is COMPLETE or proven no-call. Historical rows are never
-  guessed into a pool. Provider-reported cost is explicitly separated from
-  invoice reconciliation, which is `NOT_PERFORMED`. It separates:
+  EXACT over the FULL requested tenant/conversation/≤31-day window, requires
+  an explicit pool, and reads every aggregate inside one repeatable-read
+  transaction so the result is a consistent snapshot. Historical rows are
+  never guessed into a pool. Provider-reported cost is explicitly separated
+  from invoice reconciliation, which is `NOT_PERFORMED`. It separates:
   - scoped evidence aggregates (cost, completeness, execution proof, counts);
   - window usage counts, which are NOT pool totals because `usage_records`
     has no pool column;
@@ -201,6 +201,23 @@ billing ledger or an invoice system.
     `linkedOtherPool`, `withoutEvidence`, `missingMessageId`);
   - evidence without AI_TURN split into expected proven no-call vs unresolved;
   - unresolved historical identity (no `messageId`) vs new missing evidence.
+- **Coverage completeness (binding):** `scopedWindowTotalCostUsd` is emitted
+  only when the selected window is actually complete. A complete total is
+  null while any of these remain in the selected scope:
+  - `AI_TURN` rows with no evidence (`withoutEvidence`);
+  - historical `AI_TURN` rows without `messageId`;
+  - evidence whose execution is unresolved;
+  - evidence carrying conflict counters;
+  - contradictory `PROVEN_NO_CALL` evidence with an `AI_TURN` row.
+  `unresolvedUsageRows` is `withoutEvidence + missingMessageId` and drives the
+  selected-scope status. Known other-pool links are excluded and never become
+  selected-pool activity or missing evidence. A genuinely empty selected scope
+  is `COMPLETE` with zero; unresolved usage is not proof of emptiness.
+  `PARTIAL` means some known scoped cost exists but coverage is unresolved;
+  `UNAVAILABLE` means no known scoped cost can justify a total. Known subtotals
+  (`knownCostSubtotalUsd`, `completeTurnTotalUsd`) remain available even when
+  the complete window total is null. Conflicts and contradictory no-call/usage
+  evidence expose their counters and never replace or resolve historical rows.
 
 ### 4. Persistence Caveats & Architectural Gaps (Under Review)
 

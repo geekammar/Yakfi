@@ -1,5 +1,44 @@
 # FlowPilot — Build State
 
+## PR88 reconciliation completeness repair (Draft PR #88) — 20 November 2026
+
+- **Reviewed baseline:** PR88 HEAD `fc7b8bc946c24ccc570f14f5bb21b3ca7a785a50`
+  (`0.79.22`), Draft PR #88 on `main` `9187655` (`0.79.21`).
+- **Reproduced gap:** `TurnEvidenceRepository.reconcile` counted usage rows
+  without evidence and historical rows without `messageId`, but the
+  completeness decision ignored them once `logicalTurns > 0`. Conflicts and
+  contradictory `PROVEN_NO_CALL` + `AI_TURN` linkage were also counted or
+  silently ignored without preventing a complete total. The aggregate queries
+  ran outside a shared snapshot.
+- **Repair:** selected-scope completeness now includes unresolved usage
+  (`withoutEvidence + missingMessageId`), missing evidence beside recorded
+  turns, conflict counters, and contradictory no-call/usage linkage. A
+  complete window total is null until those are resolved; known subtotals stay
+  available. `PARTIAL` means known scoped cost exists but coverage is
+  unresolved; `UNAVAILABLE` means no known scoped cost can justify a total. A
+  genuinely empty selected scope remains `COMPLETE` with zero. Known
+  other-pool links never inflate or block the selected pool. The whole
+  reconciliation runs in one repeatable-read transaction.
+- **New exposed facts:** `evidence.conflictedTurns`,
+  `usage.aiTurnLinks.noCallWithAiTurn`, `usage.unresolvedUsageRows`, and
+  `usage.knownOtherPoolLinks` (replacing the ambiguous
+  `unclassifiedOtherPool`). Original evidence/attempt rows and conflict
+  counters are never replaced or resolved automatically.
+- **Tests:** focused disposable-PostgreSQL cases now cover complete + unlinked
+  `AI_TURN`, complete + identityless usage, unresolved-usage-only, genuine
+  empty scope, TEST evidence while querying SERVING, conflicting replay,
+  contradictory no-call/usage, cross-window ID linkage, complete/partial/
+  unknown/real-zero status, and a controlled concurrent insert proving the
+  repeatable-read snapshot.
+- **Rollout:** exact migration/deployment order is documented in
+  `docs/RELEASE_PROCESS.md`; the approved mechanism is
+  `.github/workflows/production-db-migrate.yml` with exact
+  `expected_db_host` + `expected_commit_sha`. Migrations must be applied
+  before the Render auto-deploy of the code.
+- **Not done:** no merge, deploy, production migration, paid AI call,
+  Telegram/customer send, billing/pricing change or historical backfill.
+  Required CI on the final PR HEAD is the verification authority.
+
 ## Durable usage/cost evidence refresh on PR #95 boundary (Draft PR #88, v0.79.22) — 19 November 2026
 
 - **Baseline verified:** PR #95 is merged as

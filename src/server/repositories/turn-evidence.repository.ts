@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import type { Prisma } from "@/generated/prisma/client";
+
 import type {
   DurableTurnEvidenceDto,
   ReconcileTurnEvidenceDto,
@@ -38,6 +40,17 @@ export type RecordTurnEvidenceResult = {
   status: "RECORDED" | "DUPLICATE" | "CONFLICT";
   id: string;
   customerMessageId: string;
+};
+
+/**
+ * Test-only seam used to prove that reconciliation reads a consistent
+ * snapshot. Production constructs the repository without options. The hook
+ * runs inside the repeatable-read transaction after the evidence aggregate
+ * and before the usage aggregate; it must never be used for writes in
+ * production paths.
+ */
+export type TurnEvidenceRepositoryOptions = {
+  readonly beforeUsageAggregate?: () => Promise<void>;
 };
 
 type AttemptRow = {
@@ -130,6 +143,8 @@ export type TurnEvidenceReconciliation = {
     preventedDispatches: number;
     duplicateEmissions: number;
     identityConflicts: number;
+    /** Selected-pool evidence rows whose replay facts conflicted. */
+    conflictedTurns: number;
     executionEvidence: {
       recorded: number;
       provenNoCall: number;
@@ -141,7 +156,7 @@ export type TurnEvidenceReconciliation = {
       knownCostSubtotalUsd: number | null;
       /** Sum of COMPLETE turn totals only; never a partial subtotal. */
       completeTurnTotalUsd: number | null;
-      /** Complete total ONLY when every scoped turn is complete or proven no-call. */
+      /** Complete total ONLY when selected-scope coverage and conflicts are fully resolved. */
       scopedWindowTotalCostUsd: number | null;
       scopedWindowCostStatus: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
       completeness: {
@@ -168,6 +183,8 @@ export type TurnEvidenceReconciliation = {
       linkedOtherPool: number;
       withoutEvidence: number;
       missingMessageId: number;
+      /** Selected-pool evidence proving no-call but carrying an AI_TURN row. */
+      noCallWithAiTurn: number;
     };
     evidenceWithoutAiTurn: {
       /** Proven deterministic/deferred no-call turns (expected). */
@@ -175,12 +192,18 @@ export type TurnEvidenceReconciliation = {
       /** Execution recorded/unavailable but no AI_TURN link exists. */
       unresolved: number;
     };
+    /**
+     * Usage rows that cannot be attributed to selected-pool evidence:
+     * `withoutEvidence + missingMessageId`. Known other-pool links are
+     * excluded; this value decides selected-scope coverage completeness.
+     */
+    unresolvedUsageRows: number;
     /** AI_TURN rows with no authoritative message identity (historical). */
     unresolvedHistoricalIdentity: number;
     /** AI_TURN rows with a message id but no evidence row (new/missing). */
     unresolvedMissingEvidence: number;
-    /** AI_TURN rows linked to evidence outside the requested pool. */
-    unclassifiedOtherPool: number;
+    /** Known AI_TURN rows linked to evidence outside the requested pool. */
+    knownOtherPoolLinks: number;
   };
 };
 
@@ -192,6 +215,7 @@ type RawEvidenceAggregate = {
   prevented_dispatches: number | bigint;
   duplicate_emissions: number | bigint;
   identity_conflicts: number | bigint;
+  conflicted_turns: number | bigint;
   execution_recorded: number | bigint;
   execution_proven_no_call: number | bigint;
   execution_unavailable: number | bigint;
@@ -330,6 +354,10 @@ function toEvidenceRecord(row: EvidenceRow): TurnEvidenceRecord {
 }
 
 export class TurnEvidenceRepository {
+  constructor(
+    private readonly options: TurnEvidenceRepositoryOptions = {},
+  ) {}
+
   /**
    * Persist ONE finished turn's bounded evidence. Validation and identity
    * failures throw (caller bug / forged identity). A genuine storage failure
@@ -441,9 +469,19 @@ export class TurnEvidenceRepository {
   async reconcile(input: unknown): Promise<TurnEvidenceReconciliation> {
     const parsed: ReconcileTurnEvidenceDto =
       durableTurnEvidenceValidation.reconcile.parse(input);
+    return db.$transaction(
+      (tx) => this.reconcileSnapshot(tx, parsed),
+      { isolationLevel: "RepeatableRead" },
+    );
+  }
+
+  private async reconcileSnapshot(
+    tx: Prisma.TransactionClient,
+    parsed: ReconcileTurnEvidenceDto,
+  ): Promise<TurnEvidenceReconciliation> {
     const conversationId = parsed.conversationId ?? null;
 
-    const evidenceRows = await db.$queryRaw<RawEvidenceAggregate[]>`
+    const evidenceRows = await tx.$queryRaw<RawEvidenceAggregate[]>`
       SELECT
         COUNT(*)::int AS logical_turns,
         COALESCE(SUM(e.logical_attempt_count), 0)::int AS physical_attempt_records,
@@ -452,6 +490,7 @@ export class TurnEvidenceRepository {
         COALESCE(SUM(e.prevented_attempt_count), 0)::int AS prevented_dispatches,
         COALESCE(SUM(e.replay_count), 0)::int AS duplicate_emissions,
         COALESCE(SUM(e.conflict_count), 0)::int AS identity_conflicts,
+        COUNT(*) FILTER (WHERE e.conflict_count > 0)::int AS conflicted_turns,
         COUNT(*) FILTER (WHERE e.execution_evidence = 'RECORDED')::int AS execution_recorded,
         COUNT(*) FILTER (WHERE e.execution_evidence = 'PROVEN_NO_CALL')::int AS execution_proven_no_call,
         COUNT(*) FILTER (WHERE e.execution_evidence = 'UNAVAILABLE')::int AS execution_unavailable,
@@ -471,7 +510,12 @@ export class TurnEvidenceRepository {
     `;
     const evidenceAgg = evidenceRows[0];
 
-    const usageRows = await db.$queryRaw<RawUsageAggregate[]>`
+    // Test-only snapshot seam: a write committed here must not appear in the
+    // remaining aggregates because the transaction holds a repeatable-read
+    // snapshot established by the first query.
+    await this.options.beforeUsageAggregate?.();
+
+    const usageRows = await tx.$queryRaw<RawUsageAggregate[]>`
       SELECT
         COUNT(*) FILTER (WHERE u.kind = 'INBOUND_MESSAGE')::int AS inbound,
         COUNT(*) FILTER (WHERE u.kind = 'OUTBOUND_MESSAGE')::int AS outbound,
@@ -501,10 +545,11 @@ export class TurnEvidenceRepository {
     `;
     const usageAgg = usageRows[0];
 
-    const evidenceUsageRows = await db.$queryRaw<
+    const evidenceUsageRows = await tx.$queryRaw<
       Array<{
         expected_no_call: number | bigint;
         unresolved_missing_usage: number | bigint;
+        contradictory_no_call: number | bigint;
       }>
     >`
       SELECT
@@ -525,7 +570,16 @@ export class TurnEvidenceRepository {
                 AND u.kind = 'AI_TURN'
                 AND u.message_id = e.customer_message_id
             )
-        )::int AS unresolved_missing_usage
+        )::int AS unresolved_missing_usage,
+        COUNT(*) FILTER (
+          WHERE e.execution_evidence = 'PROVEN_NO_CALL'
+            AND EXISTS (
+              SELECT 1 FROM usage_records u
+              WHERE u.business_id = e.business_id
+                AND u.kind = 'AI_TURN'
+                AND u.message_id = e.customer_message_id
+            )
+        )::int AS contradictory_no_call
       FROM turn_evidence_records e
       WHERE e.business_id = ${parsed.businessId}
         AND e.traffic_pool = ${parsed.trafficPool}
@@ -535,7 +589,7 @@ export class TurnEvidenceRepository {
     `;
     const evidenceUsageAgg = evidenceUsageRows[0];
 
-    const unknownCostRows = await db.$queryRaw<
+    const unknownCostRows = await tx.$queryRaw<
       Array<{ unknown_cost_attempts: number | bigint }>
     >`
       SELECT COALESCE(COUNT(*), 0)::int AS unknown_cost_attempts
@@ -564,18 +618,32 @@ export class TurnEvidenceRepository {
       evidenceUsageAgg.unresolved_missing_usage,
     );
     const expectedNoCall = toCount(evidenceUsageAgg.expected_no_call);
+    const noCallWithAiTurn = toCount(evidenceUsageAgg.contradictory_no_call);
+    const conflictedTurns = toCount(evidenceAgg.conflicted_turns);
+    const identityConflicts = toCount(evidenceAgg.identity_conflicts);
     const aiTurn = toCount(usageAgg.ai_turn);
+    const missingMessageId = toCount(usageAgg.ai_missing_message_id);
+    const withoutEvidence = toCount(usageAgg.ai_without_evidence);
+    const linkedOtherPool = toCount(usageAgg.ai_linked_other_pool);
+    const unresolvedUsageRows = missingMessageId + withoutEvidence;
+    const hasKnownScopedCost = complete > 0 || partial > 0;
+    const hasUnresolvedCoverage =
+      unavailable > 0 ||
+      executionUnavailable > 0 ||
+      unresolvedMissingUsage > 0 ||
+      unresolvedUsageRows > 0 ||
+      conflictedTurns > 0 ||
+      noCallWithAiTurn > 0;
 
     let scopedWindowCostStatus: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
     if (logicalTurns === 0) {
-      scopedWindowCostStatus = aiTurn > 0 ? "UNAVAILABLE" : "COMPLETE";
-    } else if (
-      unavailable > 0 ||
-      executionUnavailable > 0 ||
-      unresolvedMissingUsage > 0
-    ) {
+      // A genuinely empty selected scope is complete with zero. Usage that
+      // cannot be attributed to a known pool is NOT proof of emptiness, while
+      // known other-pool links never become selected-pool activity.
       scopedWindowCostStatus =
-        complete > 0 || partial > 0 ? "PARTIAL" : "UNAVAILABLE";
+        unresolvedUsageRows > 0 ? "UNAVAILABLE" : "COMPLETE";
+    } else if (hasUnresolvedCoverage) {
+      scopedWindowCostStatus = hasKnownScopedCost ? "PARTIAL" : "UNAVAILABLE";
     } else if (partial > 0) {
       scopedWindowCostStatus = "PARTIAL";
     } else {
@@ -605,7 +673,8 @@ export class TurnEvidenceRepository {
         unknownDispatchAttempts: toCount(evidenceAgg.unknown_dispatch_attempts),
         preventedDispatches: toCount(evidenceAgg.prevented_dispatches),
         duplicateEmissions: toCount(evidenceAgg.duplicate_emissions),
-        identityConflicts: toCount(evidenceAgg.identity_conflicts),
+        identityConflicts,
+        conflictedTurns,
         executionEvidence: {
           recorded: toCount(evidenceAgg.execution_recorded),
           provenNoCall: toCount(evidenceAgg.execution_proven_no_call),
@@ -637,17 +706,19 @@ export class TurnEvidenceRepository {
         },
         aiTurnLinks: {
           linkedScoped: toCount(usageAgg.ai_linked_scoped),
-          linkedOtherPool: toCount(usageAgg.ai_linked_other_pool),
-          withoutEvidence: toCount(usageAgg.ai_without_evidence),
-          missingMessageId: toCount(usageAgg.ai_missing_message_id),
+          linkedOtherPool,
+          withoutEvidence,
+          missingMessageId,
+          noCallWithAiTurn,
         },
         evidenceWithoutAiTurn: {
           expectedNoCall,
           unresolved: unresolvedMissingUsage,
         },
-        unresolvedHistoricalIdentity: toCount(usageAgg.ai_missing_message_id),
-        unresolvedMissingEvidence: toCount(usageAgg.ai_without_evidence),
-        unclassifiedOtherPool: toCount(usageAgg.ai_linked_other_pool),
+        unresolvedUsageRows,
+        unresolvedHistoricalIdentity: missingMessageId,
+        unresolvedMissingEvidence: withoutEvidence,
+        knownOtherPoolLinks: linkedOtherPool,
       },
     };
   }

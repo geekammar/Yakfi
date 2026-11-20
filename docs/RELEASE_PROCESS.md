@@ -303,6 +303,42 @@ gh release create v0.1.0 --verify-tag --title "FlowPilot v0.1.0" \
 | Secret leaked in a commit | Rotate the secret FIRST, then `git rm --cached <file>` + history rewrite with operator approval |
 | Catastrophic failure | Re-clone from remote or restore from backup; repo is private and re-creatable |
 
+## Additive PR88 migration/rollout order (operator-authorised, not executed)
+
+PR88 adds two additive migrations and the runtime starts recording durable
+evidence as soon as its code is deployed. `main` auto-deploys to Render on
+commit, so the migrations must be applied **before** the code reaches `main`.
+Do not rely on the fail-open storage catch: it preserves the customer outcome,
+but the evidence for that period would be lost.
+
+Approved mechanism: `.github/workflows/production-db-migrate.yml`
+(`workflow_dispatch`, `environment: Production`). It requires an exact
+`expected_db_host` matching `PRODUCTION_DATABASE_URL` and an exact
+`expected_commit_sha` matching the checked-out commit; it rejects the legacy
+Production hosts and reports pre/post `prisma migrate status`.
+
+1. Review and pass required CI on the exact PR88 head. Confirm the only schema
+   changes are `20261116120000_durable_turn_evidence` and
+   `20261116210000_durable_turn_evidence_execution_scope`.
+2. Run `production-db-migrate.yml` from `main` (the workflow file) with:
+   - `ref` = the exact PR88 head SHA (or reviewed branch);
+   - `expected_commit_sha` = that same full 40-char SHA;
+   - `expected_db_host` = the exact host of the current
+     `PRODUCTION_DATABASE_URL` (operator-supplied, never guessed).
+   Approve the `Production` environment gate. This applies only additive
+   tables/indexes; the currently deployed Render code does not use them.
+3. Confirm post-migration `Database schema is up to date` and that both PR88
+   migration names are recorded. Do not run migration commands on the VPS.
+4. Merge PR88 to `main`. Render auto-deploy (`On Commit`) then deploys the
+   code that writes the new tables.
+5. Read-only verify Render `/api/health/live` and `/api/health`: HTTP `200`,
+   exact merge `commitSha`, expected `version`, `deploymentReady=true`,
+   `database=connected`, `missingEnvVars=[]`. Do not manually deploy.
+6. Rollback if needed: revert the application commit and let Render roll back
+   to the previous verified SHA. The additive tables remain unused and must
+   not be dropped; no automated down-migration exists. If the merge is
+   cancelled after migration, the tables are harmless and unused.
+
 ## Post-Deploy Release Verification Gate (`production-release.yml`)
 
 `.github/workflows/production-release.yml` (`scripts/verify-production-release.mjs`)

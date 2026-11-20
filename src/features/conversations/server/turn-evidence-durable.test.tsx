@@ -23,7 +23,10 @@ import { buildDurableTurnEvidence } from "@/features/conversations/server/durabl
 import type { TurnEvidence } from "@/features/conversations/server/turn-evidence";
 import { db } from "@/server/db";
 import type { AiTelemetry } from "@/server/integrations/ai/types";
-import { turnEvidenceRepository } from "@/server/repositories";
+import {
+  TurnEvidenceRepository,
+  turnEvidenceRepository,
+} from "@/server/repositories";
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -185,6 +188,42 @@ function buildTelemetry(
       costCompleteness: costs.costCompleteness,
     },
   };
+}
+
+function completeTelemetry(cost = 0.0005): AiTelemetry {
+  return buildTelemetry(
+    [
+      {
+        provider: "openrouter",
+        model: "model-complete",
+        status: "SUCCESS",
+        costUsd: cost,
+        inputTokens: 12,
+        outputTokens: 4,
+      },
+    ],
+    {
+      totalCostUsd: cost,
+      knownCostSubtotalUsd: cost,
+      costCompleteness: "COMPLETE",
+    },
+  );
+}
+
+async function addAiTurnUsage(
+  fixture: Fixture,
+  options: { messageId: string | null; occurredAt?: Date },
+): Promise<void> {
+  await db.usageRecord.create({
+    data: {
+      businessId: fixture.businessId,
+      kind: "AI_TURN",
+      messageId: options.messageId,
+      provider: "openrouter",
+      status: "SUCCESS",
+      occurredAt: options.occurredAt ?? new Date(),
+    },
+  });
 }
 
 type SuccessResult = Extract<InboundResult, { ok: true; duplicate: false }>;
@@ -611,6 +650,16 @@ describe("durable turn evidence (disposable PostgreSQL)", () => {
     expect(row?.knownCostSubtotalUsd).toBe(0.0002);
     expect(row?.attempts[1]?.costUsd).toBeNull();
     expect(row?.attempts[1]?.costCompleteness).toBe("UNKNOWN");
+
+    const report = await turnEvidenceRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...windowForNow(),
+    });
+    expect(report.evidence.cost.completeTurnTotalUsd).toBeNull();
+    expect(report.evidence.cost.knownCostSubtotalUsd).toBe(0.0002);
+    expect(report.evidence.cost.scopedWindowCostStatus).toBe("PARTIAL");
+    expect(report.evidence.cost.scopedWindowTotalCostUsd).toBeNull();
   });
 
   it("keeps real zero distinct from unknown", async () => {
@@ -671,6 +720,16 @@ describe("durable turn evidence (disposable PostgreSQL)", () => {
     expect(unknown?.costCurrency).toBeNull();
     expect(unknown?.attempts[0]?.costCompleteness).toBe("UNKNOWN");
     expect(unknown?.attempts[0]?.costUsd).toBeNull();
+
+    const report = await turnEvidenceRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...windowForNow(),
+    });
+    expect(report.evidence.cost.completeTurnTotalUsd).toBe(0);
+    expect(report.evidence.cost.knownCostSubtotalUsd).toBe(0);
+    expect(report.evidence.cost.scopedWindowCostStatus).toBe("PARTIAL");
+    expect(report.evidence.cost.scopedWindowTotalCostUsd).toBeNull();
   });
 
   it("creates no paid attempt for deterministic and deferred no-call turns", async () => {
@@ -1388,5 +1447,265 @@ describe("durable turn evidence (disposable PostgreSQL)", () => {
     });
     expect(fullPage.items).toHaveLength(3);
     expect(fullPage.hasMore).toBe(false);
+  });
+
+  it("blocks a complete total when an AI_TURN has no evidence", async () => {
+    const fixture = await createFixture("منشأة دليل ناقص");
+    const cost = 0.0005;
+    const run = await runTurn(fixture, {
+      aiResponse: SAFE_HANDOFF,
+      telemetry: completeTelemetry(cost),
+    });
+    await addAiTurnUsage(fixture, { messageId: randomUUID() });
+
+    const report = await turnEvidenceRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...windowForNow(),
+    });
+    expect(report.evidence.logicalTurns).toBe(1);
+    expect(report.usage.window.aiTurn).toBe(2);
+    expect(report.usage.aiTurnLinks.linkedScoped).toBe(1);
+    expect(report.usage.aiTurnLinks.withoutEvidence).toBe(1);
+    expect(report.usage.unresolvedUsageRows).toBe(1);
+    expect(report.usage.unresolvedMissingEvidence).toBe(1);
+    expect(report.evidence.cost.knownCostSubtotalUsd).toBe(cost);
+    expect(report.evidence.cost.completeTurnTotalUsd).toBe(cost);
+    expect(report.evidence.cost.scopedWindowCostStatus).toBe("PARTIAL");
+    expect(report.evidence.cost.scopedWindowTotalCostUsd).toBeNull();
+    expect(
+      await findEvidence(fixture.businessId, run.result.customerMessageId),
+    ).not.toBeNull();
+  });
+
+  it("blocks a complete total when historical usage has no message identity", async () => {
+    const fixture = await createFixture("منشأة هوية ناقصة");
+    const cost = 0.0006;
+    await runTurn(fixture, {
+      aiResponse: SAFE_HANDOFF,
+      telemetry: completeTelemetry(cost),
+    });
+    await addAiTurnUsage(fixture, { messageId: null });
+
+    const report = await turnEvidenceRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...windowForNow(),
+    });
+    expect(report.evidence.logicalTurns).toBe(1);
+    expect(report.usage.window.aiTurn).toBe(2);
+    expect(report.usage.aiTurnLinks.missingMessageId).toBe(1);
+    expect(report.usage.unresolvedHistoricalIdentity).toBe(1);
+    expect(report.usage.unresolvedUsageRows).toBe(1);
+    expect(report.evidence.cost.knownCostSubtotalUsd).toBe(cost);
+    expect(report.evidence.cost.scopedWindowCostStatus).toBe("PARTIAL");
+    expect(report.evidence.cost.scopedWindowTotalCostUsd).toBeNull();
+  });
+
+  it("does not call an unresolved-usage-only window empty or complete", async () => {
+    const fixture = await createFixture("منشأة استخدام بلا دليل");
+    await addAiTurnUsage(fixture, { messageId: randomUUID() });
+
+    const report = await turnEvidenceRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...windowForNow(),
+    });
+    expect(report.evidence.logicalTurns).toBe(0);
+    expect(report.usage.window.aiTurn).toBe(1);
+    expect(report.usage.aiTurnLinks.withoutEvidence).toBe(1);
+    expect(report.usage.unresolvedUsageRows).toBe(1);
+    expect(report.evidence.cost.knownCostSubtotalUsd).toBeNull();
+    expect(report.evidence.cost.completeTurnTotalUsd).toBeNull();
+    expect(report.evidence.cost.scopedWindowCostStatus).toBe("UNAVAILABLE");
+    expect(report.evidence.cost.scopedWindowTotalCostUsd).toBeNull();
+  });
+
+  it("keeps a genuinely empty selected scope complete with zero", async () => {
+    const fixture = await createFixture("منشأة نطاق فارغ");
+
+    const report = await turnEvidenceRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...windowForNow(),
+    });
+    expect(report.evidence.logicalTurns).toBe(0);
+    expect(report.usage.window.aiTurn).toBe(0);
+    expect(report.usage.unresolvedUsageRows).toBe(0);
+    expect(report.evidence.cost.knownCostSubtotalUsd).toBeNull();
+    expect(report.evidence.cost.completeTurnTotalUsd).toBeNull();
+    expect(report.evidence.cost.scopedWindowCostStatus).toBe("COMPLETE");
+    expect(report.evidence.cost.scopedWindowTotalCostUsd).toBe(0);
+  });
+
+  it("does not treat known TEST activity as missing SERVING evidence", async () => {
+    const fixture = await createFixture("منشأة الفصل بين المسارات");
+    const cost = 0.0004;
+    await runTurn(fixture, {
+      aiResponse: SAFE_HANDOFF,
+      trafficPool: "TEST",
+      telemetry: completeTelemetry(cost),
+    });
+
+    const serving = await turnEvidenceRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "SERVING",
+      ...windowForNow(),
+    });
+    expect(serving.evidence.logicalTurns).toBe(0);
+    expect(serving.usage.window.aiTurn).toBe(1);
+    expect(serving.usage.aiTurnLinks.linkedScoped).toBe(0);
+    expect(serving.usage.aiTurnLinks.linkedOtherPool).toBe(1);
+    expect(serving.usage.aiTurnLinks.withoutEvidence).toBe(0);
+    expect(serving.usage.unresolvedUsageRows).toBe(0);
+    expect(serving.evidence.cost.knownCostSubtotalUsd).toBeNull();
+    expect(serving.evidence.cost.scopedWindowCostStatus).toBe("COMPLETE");
+    expect(serving.evidence.cost.scopedWindowTotalCostUsd).toBe(0);
+
+    const test = await turnEvidenceRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...windowForNow(),
+    });
+    expect(test.evidence.logicalTurns).toBe(1);
+    expect(test.usage.aiTurnLinks.linkedScoped).toBe(1);
+    expect(test.evidence.cost.scopedWindowCostStatus).toBe("COMPLETE");
+    expect(test.evidence.cost.scopedWindowTotalCostUsd).toBe(cost);
+  });
+
+  it("keeps a complete total null after a conflicting evidence replay", async () => {
+    const fixture = await createFixture("منشأة تعارض الدليل");
+    const cost = 0.0005;
+    const run = await runTurn(fixture, {
+      aiResponse: SAFE_HANDOFF,
+      telemetry: completeTelemetry(cost),
+    });
+    const evidence = run.emitted[0];
+    expect(evidence).toBeDefined();
+    const dto = buildDurableTurnEvidence(evidence!, "TEST");
+    const conflicting = {
+      ...dto,
+      totalCostUsd: cost + 0.0001,
+      knownCostSubtotalUsd: cost + 0.0001,
+      attempts: dto.attempts.map((attempt) => ({
+        ...attempt,
+        costUsd: cost + 0.0001,
+      })),
+    };
+    expect((await turnEvidenceRepository.record(conflicting)).status).toBe(
+      "CONFLICT",
+    );
+
+    const report = await turnEvidenceRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...windowForNow(),
+    });
+    expect(report.evidence.identityConflicts).toBe(1);
+    expect(report.evidence.conflictedTurns).toBe(1);
+    expect(report.evidence.cost.knownCostSubtotalUsd).toBe(cost);
+    expect(report.evidence.cost.completeTurnTotalUsd).toBe(cost);
+    expect(report.evidence.cost.scopedWindowCostStatus).toBe("PARTIAL");
+    expect(report.evidence.cost.scopedWindowTotalCostUsd).toBeNull();
+    expect(
+      await findEvidence(fixture.businessId, run.result.customerMessageId).then(
+        (row) => row?.totalCostUsd,
+      ),
+    ).toBe(cost);
+  });
+
+  it("does not treat a PROVEN_NO_CALL row with AI_TURN usage as complete", async () => {
+    const fixture = await createFixture("منشأة تناقض عدم الاستدعاء");
+    const run = await runTurn(fixture, {
+      execution: {
+        response: null,
+        providerName: "policy-unavailable",
+        telemetry: null,
+        policyUnavailable: true,
+        error: new Error("AI_POLICY_UNAVAILABLE"),
+      },
+    });
+    await addAiTurnUsage(fixture, {
+      messageId: run.result.customerMessageId,
+    });
+
+    const report = await turnEvidenceRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...windowForNow(),
+    });
+    expect(report.evidence.logicalTurns).toBe(1);
+    expect(report.evidence.executionEvidence.provenNoCall).toBe(1);
+    expect(report.usage.aiTurnLinks.linkedScoped).toBe(1);
+    expect(report.usage.aiTurnLinks.noCallWithAiTurn).toBe(1);
+    expect(report.usage.evidenceWithoutAiTurn.expectedNoCall).toBe(0);
+    expect(report.evidence.cost.knownCostSubtotalUsd).toBeNull();
+    expect(report.evidence.cost.scopedWindowCostStatus).toBe("UNAVAILABLE");
+    expect(report.evidence.cost.scopedWindowTotalCostUsd).toBeNull();
+  });
+
+  it("links usage to evidence across a window boundary without calling it missing", async () => {
+    const fixture = await createFixture("منشأة حد النافذة");
+    const cost = 0.0003;
+    await runTurn(fixture, {
+      aiResponse: SAFE_HANDOFF,
+      telemetry: completeTelemetry(cost),
+    });
+    const evidence = await db.turnEvidenceRecord.findFirstOrThrow({
+      where: { businessId: fixture.businessId },
+      select: { id: true },
+    });
+    await db.turnEvidenceRecord.update({
+      where: { id: evidence.id },
+      data: { occurredAt: new Date(Date.now() - 2 * 60 * 60 * 1000) },
+    });
+    const now = Date.now();
+    const window = {
+      from: new Date(now - 60 * 60 * 1000),
+      to: new Date(now + 60 * 60 * 1000),
+    };
+    const report = await turnEvidenceRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...window,
+    });
+    expect(report.evidence.logicalTurns).toBe(0);
+    expect(report.usage.window.aiTurn).toBe(1);
+    expect(report.usage.aiTurnLinks.linkedScoped).toBe(1);
+    expect(report.usage.aiTurnLinks.withoutEvidence).toBe(0);
+    expect(report.usage.aiTurnLinks.missingMessageId).toBe(0);
+    expect(report.usage.unresolvedUsageRows).toBe(0);
+    expect(report.evidence.cost.scopedWindowCostStatus).toBe("COMPLETE");
+    expect(report.evidence.cost.scopedWindowTotalCostUsd).toBe(0);
+  });
+
+  it("uses one repeatable-read snapshot for every reconciliation aggregate", async () => {
+    const fixture = await createFixture("منشأة لقطة متسقة");
+    const cost = 0.0007;
+    await runTurn(fixture, {
+      aiResponse: SAFE_HANDOFF,
+      telemetry: completeTelemetry(cost),
+    });
+    let inserted = false;
+    const snapshotRepository = new TurnEvidenceRepository({
+      beforeUsageAggregate: async () => {
+        if (inserted) return;
+        inserted = true;
+        await addAiTurnUsage(fixture, { messageId: randomUUID() });
+      },
+    });
+
+    const report = await snapshotRepository.reconcile({
+      businessId: fixture.businessId,
+      trafficPool: "TEST",
+      ...windowForNow(),
+    });
+    expect(inserted).toBe(true);
+    expect(report.evidence.logicalTurns).toBe(1);
+    expect(report.usage.window.aiTurn).toBe(1);
+    expect(report.usage.aiTurnLinks.withoutEvidence).toBe(0);
+    expect(report.usage.unresolvedUsageRows).toBe(0);
+    expect(report.evidence.cost.scopedWindowCostStatus).toBe("COMPLETE");
+    expect(report.evidence.cost.scopedWindowTotalCostUsd).toBe(cost);
   });
 });

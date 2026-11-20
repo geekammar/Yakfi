@@ -411,21 +411,28 @@ turn_evidence_records + turn_evidence_attempts
   or change the customer outcome. Storage failure means the durable row is
   absent — no delivery guarantee is claimed.
 - **Reconciliation:** `TurnEvidenceRepository.reconcile(...)` is EXACT over the
-  full requested tenant/conversation/≤31-day window and requires an explicit
-  pool. Usage-window counts are labelled as NOT pool totals (`usage_records`
-  has no pool column). Links are checked by authoritative IDs without a
-  timestamp join, so window-edge crossings are not called missing. Evidence
-  without AI_TURN is split into expected proven no-call vs unresolved;
-  historical identity-less usage is separate from new missing evidence. A
-  complete window total is emitted only when every scoped turn is complete or
-  proven no-call. Provider-reported evidence is separate from invoice
-  reconciliation (`NOT_PERFORMED`).
+  full requested tenant/conversation/≤31-day window, requires an explicit
+  pool, and runs every aggregate inside one repeatable-read transaction.
+  Usage-window counts are labelled as NOT pool totals (`usage_records` has no
+  pool column). Links are checked by authoritative IDs without a timestamp
+  join, so window-edge crossings are not called missing. Evidence without
+  AI_TURN is split into expected proven no-call vs unresolved; historical
+  identity-less usage is separate from new missing evidence, and known
+  other-pool links are never counted as selected-pool activity. A complete
+  window total is emitted only when no selected-scope evidence, usage or
+  conflict coverage remains unresolved. A genuine empty selected scope is
+  complete with zero; unresolved usage is not proof of emptiness. Conflicts
+  and contradictory `PROVEN_NO_CALL` + `AI_TURN` evidence expose counters and
+  keep the complete total null. Provider-reported evidence is separate from
+  invoice reconciliation (`NOT_PERFORMED`).
 
 Checks: `pnpm check:request-scoped-usage` (production wrapper interleaving with
 fake provider HTTP), `pnpm check:durable-turn-evidence` (offline
 projection/allowlist), and `pnpm test:turn-evidence-durable-db` (disposable
 PostgreSQL: replay, pool isolation, exact aggregation, window edges, missing
-links, unknown execution/prevention, precision, persistence failure).
+links, unresolved usage/identity, conflict and contradictory evidence,
+repeatable-read snapshot, unknown execution/prevention, precision and
+persistence failure).
 
 ## Context budget (minimal prompt context)
 
