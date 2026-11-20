@@ -209,15 +209,15 @@ billing ledger or an invoice system.
     - evidence whose execution is unresolved;
     - evidence carrying conflict counters;
     - contradictory `PROVEN_NO_CALL` evidence with an `AI_TURN` row.
-  `unresolvedUsageRows` is `withoutEvidence + missingMessageId` and drives the
-  selected-scope status. Known other-pool links are excluded and never become
-  selected-pool activity or missing evidence. A genuinely empty selected scope
-  is `COMPLETE` with zero; unresolved usage is not proof of emptiness.
-  `PARTIAL` means some known scoped cost exists but coverage is unresolved;
-  `UNAVAILABLE` means no known scoped cost can justify a total. Known subtotals
-  (`knownCostSubtotalUsd`, `completeTurnTotalUsd`) remain available even when
-  the complete window total is null. Conflicts and contradictory no-call/usage
-  evidence expose their counters and never replace or resolve historical rows.
+    `unresolvedUsageRows` is `withoutEvidence + missingMessageId` and drives the
+    selected-scope status. Known other-pool links are excluded and never become
+    selected-pool activity or missing evidence. A genuinely empty selected scope
+    is `COMPLETE` with zero; unresolved usage is not proof of emptiness.
+    `PARTIAL` means some known scoped cost exists but coverage is unresolved;
+    `UNAVAILABLE` means no known scoped cost can justify a total. Known subtotals
+    (`knownCostSubtotalUsd`, `completeTurnTotalUsd`) remain available even when
+    the complete window total is null. Conflicts and contradictory no-call/usage
+    evidence expose their counters and never replace or resolve historical rows.
 
 ### 4. Persistence Caveats & Architectural Gaps (Under Review)
 
