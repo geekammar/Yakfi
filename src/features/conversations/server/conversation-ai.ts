@@ -1447,6 +1447,39 @@ export function buildServiceCatalogContent(
 }
 
 /**
+ * The truthful placeholder for a service whose authoritative price was not
+ * stored. It states the absence and the next step; it never invents an amount
+ * and never suppresses the rest of the catalog.
+ */
+export const SERVICE_PRICE_UNAVAILABLE_TEXT =
+  "السعر غير متاح — يحتاج تأكيد من الفريق";
+
+/**
+ * Server-authoritative rendering for the AGGREGATE service-catalog price
+ * answer (catalog scope). The input is the already task-gated, tenant-proven
+ * `request.services` list; a service without a carried price is rendered with
+ * the bounded unavailable text rather than omitted. Fixed/range/starting/
+ * case-dependent prices arrive already formatted by `formatServicePrice`, so
+ * their stored wording is preserved exactly. The model's prose is never used.
+ */
+export function buildServiceCatalogPriceContent(
+  services: ReadonlyArray<{ name: string; price?: string }>,
+): string {
+  const lines = services
+    .map((service) => {
+      const name = service.name.trim();
+      if (!name) return null;
+      const price =
+        typeof service.price === "string" && service.price.trim().length > 0
+          ? service.price.trim()
+          : SERVICE_PRICE_UNAVAILABLE_TEXT;
+      return `• ${name}: ${price}`;
+    })
+    .filter((line): line is string => line !== null);
+  return `الخدمات المتاحة وأسعارها:\n${lines.join("\n")}.`;
+}
+
+/**
  * The deterministic identity reply. `intent: "FAQ"` is the established
  * contract label for an identity answer (the same intent the provider prompt
  * uses), so the disclosure gate backs it from the `business.identity` family

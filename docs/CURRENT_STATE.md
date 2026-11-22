@@ -1,12 +1,48 @@
 # FlowPilot — Current State
 
 > **Tier 0 orientation snapshot — as of 19 November 2026.** Read with
-> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0D records the
-> merged PR #95 request-scoped policy-failure boundary and the read-only Render
-> observation. Section 0E records the refreshed Draft PR #88 durable-evidence
-> candidate. Sections 0/00/0A/0B and 1–9 retain prior release, R5, R6, Y83 and
-> QA249/QA250 evidence unchanged. The Render app is technically ready;
-> Telegram cutover and live product acceptance have not been performed.
+> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0F records the
+> authoritative service-catalog pricing repair candidate on top of current
+> `main`. Section 0D records the merged PR #95 request-scoped policy-failure
+> boundary and the read-only Render observation. Section 0E records the
+> refreshed Draft PR #88 durable-evidence candidate. Sections 0/00/0A/0B and
+> 1–9 retain prior release, R5, R6, Y83 and QA249/QA250 evidence unchanged.
+> The Render app is technically ready; Telegram cutover and live product
+> acceptance have not been performed.
+
+## 0F. Authoritative service-catalog pricing repair (Draft PR, 0.79.23) — 22 November 2026
+
+- **Baseline verified:** current `main` is
+  `8dc01b866b5eb5e9855f94939e709602b48df07e` (`0.79.22`, PR #88 merged). The
+  unrelated durable-evidence branch/PR #88 was not reset or overwritten.
+- **Confirmed live failure:** conversation
+  `b56c9e2c-cb33-4872-bfdd-82c9a11dea58`, customer message
+  `7c70fb9c-6283-4d89-93ef-cf6c66cc6376`, trace
+  `05872bc04e004599b761a55f71cc37fc` (2026-11-21 23:54:57–23:55:05 UTC).
+  The model declared `service.price` and the ledger was included/disclosable,
+  but the single-service gate required one exact service id and refused the
+  aggregate request as `UNAVAILABLE_IN_REQUEST`; the delivered safe handoff
+  was `POLICY_REFUSED`, not a delivery failure. The raw model source
+  reference is not retained, so its exact value is not claimed.
+- **Repair:** the canonical contract gains a typed
+  `knowledgeRef.scope` (`single` | `catalog`). `service.price` + `catalog`
+  (no source id) renders the authoritative carried active catalog with stored
+  fixed/range/conditional prices and an explicit unavailable/needs-confirmation
+  line for an unpriced service. Single-service price still requires the exact
+  id; unknown/foreign/ambiguous references, inactive services, other tenants
+  and off-task price families stay refused. No second resolver, renderer,
+  prompt intent rule or cost engine was added.
+- **Diagnostics:** refusal evidence carries the actual resolved family in
+  `disclosureChannel` (including `service.price`), plus typed
+  `disclosureProposedScope` and `disclosureSourceReference`. Successful
+  `service.price` decisions also carry the evaluated scope (`catalog`, a
+  declared `single`, or `null` when undeclared). `POLICY_REFUSED` copy is
+  neutral about delivery; actual success/failure remains in the independent
+  delivery indicator.
+- **Verification:** focused offline suites only; required CI on the Draft PR
+  HEAD is the authority. No merge, deploy, migration, paid AI call, Telegram
+  send or live-conversation modification was performed. Live retest requires
+  the operator's bounded Muse/real-channel procedure.
 
 ## 0D. PR #95 merged: request-scoped policy fail-closed — 19 November 2026
 

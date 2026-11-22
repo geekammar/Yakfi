@@ -172,6 +172,12 @@ export type ContextServiceFact = {
   readonly description?: string | null;
   readonly durationMinutes?: number | null;
   /**
+   * Operational state (INTERNAL). Inactive services are hidden upstream by
+   * the service repository; the builder also refuses them defensively so an
+   * inactive row can never enter the request or an aggregate catalog answer.
+   */
+  readonly isActive?: boolean;
+  /**
    * Structured, authoritative price columns (PROMPT-AI-ARCH-13 — Slice 6).
    * The builder formats them into the MINIMAL display string via
    * `formatServicePrice` and exposes it ONLY when the turn is price-relevant
@@ -777,6 +783,9 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
     description?: string;
   }> = [];
   for (const service of sources.services) {
+    // Inactive services are hidden upstream by the repository; refuse them
+    // here as well so no aggregate catalog or price answer can expose one.
+    if (service.isActive === false) continue;
     // Per-row tenant proof: a service from another Business is excluded,
     // never resolved by the AI.
     const nameVerdict = evaluateCandidate({
@@ -909,9 +918,11 @@ export function buildAiContext(input: BuildAiContextInput): BuiltAiContext {
   // Aggregate service-price disclosure family (PROMPT-AI-ARCH-13 — Slice 6):
   // the ONE ledger key the disclosure gate consults to back a price answer
   // (a per-service key cannot be matched by the gate's single-family lookup).
-  // CONDITIONAL + task-gated on price relevance; `channelCarried("services")`
-  // in the gate separately proves a price is actually carried, so this family
-  // being disclosable never emits an invented price.
+  // CONDITIONAL + task-gated on price relevance. Single-service scope also
+  // requires the exact service's carried price; catalog scope requires a
+  // non-empty carried catalog and renders an unpriced service truthfully
+  // rather than inventing a number. Either way the family being disclosable
+  // never emits an invented price.
   evaluateCandidate({
     ledger,
     scope,

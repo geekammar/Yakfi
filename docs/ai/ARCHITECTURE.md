@@ -324,7 +324,11 @@ server/turn-evidence.ts`): bounded machine-safe fields only —
   `pricePresent`, `availabilityPresent`), `knowledgeSourceClass[]`, `provider`,
   `model`, `providerAttempts`, `providerStatus`, `providerLatencyMs`,
   `parseSuccess`, `disclosureChannel`, `disclosureAllowed`,
-  `disclosureRefusalReason`, `knowledgeGapCategory`, `finalOutcome`,
+  `disclosureRefusalReason`, `disclosureDeclaredIntent`,
+  `disclosureProposedFamily`, `disclosureProposedScope`,
+  `disclosureProposalStatus`, `disclosureSourceReference`,
+  `disclosureLedgerIncluded`, `disclosureLedgerDisclosable`,
+  `knowledgeGapCategory`, `finalOutcome`,
   `outboundSendAttempted`, `outboundSendDelivered`,
   `outboundDeliveryErrorCode`, `emittedAt`.
   **Never** customer message text, phone numbers, keys/tokens/secretRefs,
@@ -343,13 +347,16 @@ server/turn-evidence.ts`): bounded machine-safe fields only —
   customer turn, and no telemetry dependency sits on the critical path. The
   engine dep `turnTelemetry` is OPTIONAL (same convention as
   `attentionRepository` / `knowledgeGapRepository`); offline harnesses omit it.
-- **Disclosure observation:** `disclosure.channel` is the ledger family that
-  actually backed a disclosed reply (`business.faqs`, `business.address`,
-  `service.name`, …), `routing-action` when the turn's output is a routing
-  action (handoff / booking_handoff, which discloses no knowledge), or the
-  primary family a refused self-authored reply needed; `disclosureAllowed` is
-  the gate verdict and `disclosureRefusalReason` the typed refusal when the
-  gate refused. The gate itself is UNCHANGED — OPS-22 only records its verdict.
+- **Disclosure observation:** `disclosure.channel` is the family the gate
+  actually evaluated: the ledger family that backed a disclosed reply
+  (`business.faqs`, `business.address`, `service.price`, …),
+  `routing-action` for a routing action (handoff / booking_handoff, which
+  discloses no knowledge), or the resolved proposed family (closed `UNKNOWN`,
+  or `unresolved` when none was declared) on a refusal. It never attributes a
+  price/catalog refusal to the generic FAQ family. `disclosureAllowed` is the
+  gate verdict; `disclosureRefusalReason`, `disclosureProposedScope` and
+  `disclosureSourceReference` are the typed refusal diagnostics when the gate
+  refused. The gate decision itself is unchanged by observation.
 - **Invariants preserved:** one generative call max, no second
   inference/resolver/state/planner/classifier, no prompt/schema/migration
   change, no change to routing/context/disclosure/booking/handoff precedence.
@@ -741,9 +748,17 @@ never sent.
   the proposal resolver and by the shared model instruction. A model-authored
   reply may declare only `business.identity`, `business.address`,
   `business.about`, `business.faqs`, `service.name`, `service.price` or
-  `service.description`. A service-price answer must cite the exact
+  `service.description`. A single-service price answer must cite the exact
   `service.price` source id rendered for the selected service in `services[]`;
-  a service name is never accepted as that id. `domain.availability` and
+  a service name is never accepted as that id. A catalog-wide "all services
+  and their prices" answer uses the SAME `service.price` family with the
+  typed `knowledgeRef.scope: "catalog"` and NO source id. The gate then
+  renders every carried, tenant-proven, active service from
+  `request.services`: stored fixed/range/starting/case-dependent wording is
+  preserved, and a service without a stored price is explicitly shown as
+  unavailable/needs confirmation rather than omitted or invented. Catalog
+  scope with a single source id, or a scope on any non-price family, is an
+  `AMBIGUOUS_MATCH` conflict. `domain.availability` and
   `business.cancellationPolicy` remain recognized families but are
   domain/handoff-owned; they are not model-authorable reply sources. The
   parser deliberately keeps the field a bounded string so an unknown label
@@ -810,16 +825,23 @@ ever surfaced):
 **Refusal evidence.** The gate returns bounded `diagnostics` on every refusal:
 the validated `declaredIntent`, the `proposalStatus` (`RESOLVED` · `MISSING` ·
 `UNKNOWN_FAMILY` · `CONFLICT`), the canonical `proposedFamily` (or the closed
-`UNKNOWN` sentinel / null), and the relevant ledger record's
+`UNKNOWN` sentinel / null), the typed `proposedScope` (single/catalog/null),
+the bounded `sourceReference` outcome (`NONE` · `MATCHED` · `UNKNOWN` ·
+`AMBIGUOUS` · `NOT_APPLICABLE`), and the relevant ledger record's
 `ledgerIncluded`/`ledgerDisclosable` verdicts. The engine copies these to
 `TurnDisclosureObservation` and `flowpilot.turn.evidence@v1`
 (`disclosureDeclaredIntent`, `disclosureProposedFamily`,
-`disclosureProposalStatus`, `disclosureLedgerIncluded`,
-`disclosureLedgerDisclosable`). The legacy `disclosureChannel` semantics are
-unchanged: on a refusal it still reports the intent-derived primary family
-(for `FAQ`, `business.faqs`) and must not be read as the model's selected
-family. No raw model label, reply text, source content, customer text or
-secret enters evidence.
+`disclosureProposedScope`, `disclosureProposalStatus`,
+`disclosureSourceReference`, `disclosureLedgerIncluded`,
+`disclosureLedgerDisclosable`). `disclosureChannel` now reports the family the
+gate ACTUALLY evaluated: the backing family on a disclosure, or the resolved
+proposed family (closed `UNKNOWN`, or `unresolved` when no family was
+declared) on a refusal. It never falls back to the intent-derived FAQ family
+for a price/catalog refusal. On a successful `service.price` decision the same
+`disclosureProposedScope` field carries the scope the canonical resolver
+evaluated (`catalog`, a declared `single`, or `null` when undeclared); other
+successful families carry no meaningful scope. No raw model label, source id,
+reply text, source content, customer text or secret enters evidence.
 
 Guard: `pnpm check:ai-disclosure`, `pnpm check:unknown-information-handoff`
 (including the new knowledge-family/availability/evidence cases) and

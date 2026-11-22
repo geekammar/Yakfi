@@ -134,6 +134,8 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
 | 116 | Durable turn usage/cost evidence: bounded content-free projection, stable message identity, replay/conflict semantics, explicit pools, read-only reconciliation | turn cost evidence/persistence/reconciliation | [#116](DECISIONS.md) |
 | 117 | PR88 repair: request-scoped execution reuse, required pool scope, exact full-window reconciliation, execution-proof/dispatch honesty | durable evidence concurrency/pools/reconciliation/unknown execution | [#117](DECISIONS.md) |
 | 118 | PR88 reconciliation completeness: unresolved usage/identity/conflicts/contradictory no-call block complete totals; known subtotals remain; repeatable-read snapshot; known other-pool links excluded | durable evidence reconciliation/completeness/conflicts/snapshot | [#118](DECISIONS.md) |
+| 119 | Authoritative service-catalog pricing: typed `service.price` catalog scope, truthful missing-price rendering, exact single-service ids preserved, refusal diagnostics report the evaluated family/source outcome | service-catalog price questions/service.price gate/refusal evidence | [#119](DECISIONS.md) |
+| 120 | PR96 focused repair: successful `service.price` evidence carries the canonical evaluated scope; `POLICY_REFUSED` copy is neutral about delivery and leaves actual status to the existing indicator | successful scope evidence/POLICY_REFUSED copy | [#120](DECISIONS.md) |
 
 ## Historical decisions (never load unless doing forensics)
 

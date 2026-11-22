@@ -18,6 +18,7 @@ import {
 } from "../src/features/conversations/server/ai-disclosure";
 import {
   SAFE_HANDOFF_REPLIES,
+  SERVICE_PRICE_UNAVAILABLE_TEXT,
   resolveHandoffActionReply,
 } from "../src/features/conversations/server/conversation-ai";
 import { receiveInboundMessage } from "../src/features/conversations/server/conversation-engine";
@@ -2710,6 +2711,145 @@ async function runSuite(): Promise<void> {
         !hPrice.getSent()[0]!.includes("999"),
       { resPrice, sent: hPrice.getSent() },
     );
+    const priceEvidence = buildTurnEvidence(resPrice, {
+      environment: "test",
+      appVersion: "0.0.0",
+      emittedAt: now,
+    });
+    check(
+      "15.E1 Undeclared single-service scope stays null and allowed, not fabricated catalog",
+      priceEvidence.disclosureChannel === "service.price" &&
+        priceEvidence.disclosureAllowed === true &&
+        priceEvidence.disclosureProposedScope === null &&
+        priceEvidence.disclosureRefusalReason === null,
+      priceEvidence,
+    );
+
+    // 15.E2 Aggregate catalog + prices via the explicit typed catalog scope:
+    // one authoritative server-rendered list, all active services, stored
+    // price shapes preserved, missing price stated truthfully, no invented
+    // number, one model call and one send.
+    const catalogPriceServices = [
+      {
+        id: "svc-cat-fixed",
+        businessId: TENANT_A,
+        name: "تنظيف أسنان",
+        description: null,
+        durationMinutes: 30,
+        priceType: "FIXED",
+        priceAmount: 300,
+        priceCurrency: "EGP",
+        isActive: true,
+      },
+      {
+        id: "svc-cat-range",
+        businessId: TENANT_A,
+        name: "حشو عصب",
+        description: null,
+        durationMinutes: 30,
+        priceType: "RANGE",
+        priceAmount: 350,
+        priceMaxAmount: 600,
+        priceCurrency: "EGP",
+        isActive: true,
+      },
+      {
+        id: "svc-cat-conditional",
+        businessId: TENANT_A,
+        name: "جلسة تجميلية",
+        description: null,
+        durationMinutes: 30,
+        priceType: "CONDITIONAL",
+        priceNote: "حسب الحالة",
+        isActive: true,
+      },
+      {
+        id: "svc-cat-unpriced",
+        businessId: TENANT_A,
+        name: "كشف جراحة",
+        description: null,
+        durationMinutes: 30,
+        priceType: null,
+        isActive: true,
+      },
+      {
+        id: "svc-cat-inactive",
+        businessId: TENANT_A,
+        name: "خدمة موقوفة",
+        description: null,
+        durationMinutes: 30,
+        priceType: "FIXED",
+        priceAmount: 888,
+        priceCurrency: "EGP",
+        isActive: false,
+      },
+    ];
+    const hCatalogPrice = createEngineHarness({
+      faqs: [],
+      services: catalogPriceServices,
+      responders: [
+        async () => ({
+          intent: "FAQ",
+          action: "reply",
+          content: "الأسعار تبدأ من 999 جنيه.",
+          extraction: emptyExtraction,
+          handoffReason: null,
+          summary: null,
+          safetyAssessment: "safe",
+          requiredKnowledge: "service.price",
+          knowledgeRef: {
+            family: "service.price",
+            scope: "catalog" as const,
+          },
+        }),
+      ],
+    });
+    const resCatalogPrice = await hCatalogPrice.runInbound(
+      "ممكن أعرف الخدمات المتاحة وسعر كل خدمة؟",
+      "ext-15-catalog-price",
+    );
+    const sentCatalogPrice = hCatalogPrice.getSent();
+    check(
+      "15.E2 Aggregate catalog+prices -> authoritative list, truthful missing price, no invention",
+      resCatalogPrice.ok === true &&
+        !resCatalogPrice.duplicate &&
+        resCatalogPrice.assistantAction === "AI_REPLY" &&
+        resCatalogPrice.conversationStatus === "AI_ACTIVE" &&
+        resCatalogPrice.handoffCause === null &&
+        resCatalogPrice.observability?.disclosure?.allowed === true &&
+        resCatalogPrice.observability?.disclosure?.channel ===
+          "service.price" &&
+        sentCatalogPrice.length === 1 &&
+        sentCatalogPrice[0]!.includes("تنظيف أسنان") &&
+        sentCatalogPrice[0]!.includes("حشو عصب") &&
+        sentCatalogPrice[0]!.includes("جلسة تجميلية") &&
+        sentCatalogPrice[0]!.includes("كشف جراحة") &&
+        sentCatalogPrice[0]!.includes("300 جنيه") &&
+        sentCatalogPrice[0]!.includes("من 350 إلى 600 جنيه") &&
+        sentCatalogPrice[0]!.includes("حسب الحالة") &&
+        sentCatalogPrice[0]!.includes(SERVICE_PRICE_UNAVAILABLE_TEXT) &&
+        !sentCatalogPrice[0]!.includes("999") &&
+        !sentCatalogPrice[0]!.includes("888") &&
+        !sentCatalogPrice[0]!.includes("خدمة موقوفة") &&
+        hCatalogPrice.getProviderInvocations() === 1 &&
+        hCatalogPrice.getAppointmentWrites() === 0 &&
+        hCatalogPrice.getAttention().size === 0,
+      { resCatalogPrice, sentCatalogPrice },
+    );
+    const catalogPriceEvidence = buildTurnEvidence(resCatalogPrice, {
+      environment: "test",
+      appVersion: "0.0.0",
+      emittedAt: now,
+    });
+    check(
+      "15.E3 Successful catalog reply exposes allowed service.price + catalog scope evidence",
+      catalogPriceEvidence.disclosureChannel === "service.price" &&
+        catalogPriceEvidence.disclosureAllowed === true &&
+        catalogPriceEvidence.disclosureProposedScope === "catalog" &&
+        catalogPriceEvidence.disclosureProposedFamily === null &&
+        catalogPriceEvidence.disclosureRefusalReason === null,
+      catalogPriceEvidence,
+    );
 
     // 15.F Missing service price or a cross-tenant source: no fabricated
     // price, no tenant leakage, safe refusal.
@@ -3012,7 +3152,7 @@ async function runSuite(): Promise<void> {
     );
     check(
       "15.N Unknown-family evidence exposes UNKNOWN, never the raw model label/content",
-      unknownEvidence.disclosureChannel === "business.faqs" &&
+      unknownEvidence.disclosureChannel === "UNKNOWN" &&
         unknownEvidence.disclosureDeclaredIntent === "FAQ" &&
         unknownEvidence.disclosureProposedFamily === "UNKNOWN" &&
         unknownEvidence.disclosureProposalStatus === "UNKNOWN_FAMILY" &&
@@ -3025,9 +3165,9 @@ async function runSuite(): Promise<void> {
       unknownEvidence,
     );
 
-    // 15.O A proposed SERVICE family is distinguishable from the legacy
-    // intent-derived business.faqs channel (pure evidence projection fixture;
-    // this does NOT claim the historical R6 proposal).
+    // 15.O A proposed SERVICE family is the channel the gate actually
+    // evaluated (pure evidence projection fixture; this does NOT claim the
+    // historical R6 proposal).
     const serviceFamilyEvidence = buildTurnEvidence(
       {
         ok: true,
@@ -3038,7 +3178,7 @@ async function runSuite(): Promise<void> {
         assistantProvider: "fixture",
         observability: {
           disclosure: {
-            channel: "business.faqs",
+            channel: "service.name",
             allowed: false,
             refusalReason: "EXCLUDED_FROM_CONTEXT",
             declaredIntent: "FAQ",
@@ -3052,8 +3192,8 @@ async function runSuite(): Promise<void> {
       { environment: "test", appVersion: "0.0.0", emittedAt: now },
     );
     check(
-      "15.O Proposed service family is retained while legacy disclosureChannel stays business.faqs",
-      serviceFamilyEvidence.disclosureChannel === "business.faqs" &&
+      "15.O Proposed service family is retained as the evaluated disclosure channel",
+      serviceFamilyEvidence.disclosureChannel === "service.name" &&
         serviceFamilyEvidence.disclosureProposedFamily === "service.name" &&
         serviceFamilyEvidence.disclosureProposalStatus === "RESOLVED" &&
         serviceFamilyEvidence.disclosureLedgerIncluded === false &&

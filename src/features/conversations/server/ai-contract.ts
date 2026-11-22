@@ -725,6 +725,18 @@ export const disclosureProposalStatusValues = [
 export type DisclosureProposalStatus =
   (typeof disclosureProposalStatusValues)[number];
 
+/**
+ * Typed scope of a model-authored knowledge proposal. Absent means the
+ * established single-source contract. `catalog` is the explicit aggregate
+ * scope for a service-price list covering every carried service; it is only
+ * valid for `service.price` and carries NO single `sourceId`.
+ */
+export const knowledgeScopeValues = ["single", "catalog"] as const;
+
+export type KnowledgeScope = (typeof knowledgeScopeValues)[number];
+
+export const knowledgeScopeSchema = z.enum(knowledgeScopeValues);
+
 /** Closed observation value: canonical family, unknown sentinel, or missing. */
 export type ProposedKnowledgeFamilyObservation =
   KnowledgeFamily | "UNKNOWN" | null;
@@ -737,7 +749,7 @@ const modelAuthorableKnowledgeFamilyKeys =
  * vocabulary above. `buildPromptMessages` appends it to the existing system
  * instructions for every adapter; no provider-specific prompt copy exists.
  */
-export const knowledgeFamilyPromptDirective = `Knowledge family contract: when action=reply and the intent is not GREETING, declare the knowledge family with requiredKnowledge and/or knowledgeRef.family using EXACTLY one of: ${modelAuthorableKnowledgeFamilyKeys}. Use the exact machine key and never invent a family label. A service catalog listing uses service.name. A stored FAQ answer uses business.faqs with a matching knowledgeRef.sourceId or sourceId. A service price answer uses service.price with knowledgeRef.sourceId or sourceId set to the EXACT service id shown for the selected service in services[]; never use a service name as the source id. domain.availability is domain-owned and must use booking_handoff, never a model-authored reply.`;
+export const knowledgeFamilyPromptDirective = `Knowledge family contract: when action=reply and the intent is not GREETING, declare the knowledge family with requiredKnowledge and/or knowledgeRef.family using EXACTLY one of: ${modelAuthorableKnowledgeFamilyKeys}. Use the exact machine key and never invent a family label. A service catalog listing without prices uses service.name. A stored FAQ answer uses business.faqs with a matching knowledgeRef.sourceId or sourceId. A service price answer for ONE service uses service.price with knowledgeRef.sourceId or sourceId set to the EXACT service id shown for the selected service in services[]; never use a service name as the source id. A CATALOG-WIDE answer listing all available services and their prices uses service.price with knowledgeRef.scope set to "catalog" and NO sourceId; the server authoritatively renders every carried service and states that a service without a stored price needs confirmation; catalog scope remains answerable even when one or more services are unpriced. knowledgeRef.scope may be only "single" or "catalog" and is meaningful only for service.price. domain.availability is domain-owned and must use booking_handoff, never a model-authored reply.`;
 
 /**
  * Structured source reference proposed by the model (ISS-012).
@@ -749,6 +761,7 @@ export const aiKnowledgeRefSchema = z.union([
   z.object({
     family: z.string().trim().min(1).max(64).optional(),
     sourceId: z.string().trim().min(1).max(120).optional().nullable(),
+    scope: knowledgeScopeSchema.nullish(),
   }),
   z.string().trim().min(1).max(120),
 ]);
