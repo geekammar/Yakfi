@@ -4,6 +4,7 @@
  * Verifies the component lifecycle, persistent header elements, assignee/responder
  * resolution, mobile context tab switching, and transition actions in JSDOM.
  */
+import { ConversationActions } from "@/features/conversations/components/conversation-actions";
 import {
   ConversationDetail,
   formatAppointmentDate,
@@ -509,6 +510,178 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
     expect(transitionConversation).toHaveBeenCalledWith({
       id: "conv-test-1",
       transition: "RETURN_TO_AI",
+    });
+  });
+
+  describe("Direct Return to AI for unassigned human handoff", () => {
+    const unassignedHandoff: ConversationDetailData = {
+      ...mockData,
+      status: "NEED_HUMAN",
+      assignedUser: null,
+    };
+
+    function renderActions(data: ConversationDetailData, isPending = false) {
+      const root = createRoot(container);
+      const handleTransition = vi.fn();
+      act(() => {
+        root.render(
+          <ConversationActions
+            data={data}
+            isPending={isPending}
+            handleTransition={handleTransition}
+          />,
+        );
+      });
+      return { root, handleTransition };
+    }
+
+    it("shows BOTH take-over and return-to-assistant for unassigned NEED_HUMAN", () => {
+      const { root } = renderActions(unassignedHandoff);
+      expect(
+        container.querySelector('button[aria-label="تولّي المحادثة"]'),
+      ).not.toBeNull();
+      expect(
+        container.querySelector('button[aria-label="إعادة للمساعد"]'),
+      ).not.toBeNull();
+      root.unmount();
+    });
+
+    it("calls RETURN_TO_AI once and never TAKE_OVER from the direct return action", () => {
+      const { root, handleTransition } = renderActions(unassignedHandoff);
+      const returnButton = container.querySelector(
+        'button[aria-label="إعادة للمساعد"]',
+      ) as HTMLButtonElement | null;
+      act(() => {
+        returnButton?.click();
+      });
+      expect(handleTransition).toHaveBeenCalledTimes(1);
+      expect(handleTransition).toHaveBeenCalledWith("RETURN_TO_AI");
+      expect(handleTransition).not.toHaveBeenCalledWith("TAKE_OVER");
+      root.unmount();
+    });
+
+    it("disables both direct actions while a transition is pending", () => {
+      const { root } = renderActions(unassignedHandoff, true);
+      const takeOver = container.querySelector(
+        'button[aria-label="تولّي المحادثة"]',
+      ) as HTMLButtonElement | null;
+      const returnToAi = container.querySelector(
+        'button[aria-label="إعادة للمساعد"]',
+      ) as HTMLButtonElement | null;
+      expect(takeOver?.disabled).toBe(true);
+      expect(returnToAi?.disabled).toBe(true);
+      root.unmount();
+    });
+
+    it("preserves single-action behavior for assigned human handoff and AI_ACTIVE", () => {
+      const assigned = renderActions({
+        ...unassignedHandoff,
+        assignedUser: { id: "user-me", name: "أحمد المشرف", image: null },
+      });
+      expect(
+        container.querySelector('button[aria-label="تولّي المحادثة"]'),
+      ).toBeNull();
+      expect(
+        container.querySelector('button[aria-label="إعادة للمساعد"]'),
+      ).not.toBeNull();
+      assigned.root.unmount();
+
+      const aiActive = renderActions({ ...mockData, status: "AI_ACTIVE" });
+      expect(
+        container.querySelector('button[aria-label="تولّي المحادثة"]'),
+      ).not.toBeNull();
+      expect(
+        container.querySelector('button[aria-label="إعادة للمساعد"]'),
+      ).toBeNull();
+      aiActive.root.unmount();
+    });
+
+    it("keeps a draft and remains NEED_HUMAN after a failed direct return", async () => {
+      transitionConversation.mockResolvedValueOnce({
+        success: false,
+        message: "تعذر إعادة المحادثة للمساعد",
+      });
+      const root = createRoot(container);
+      const data = {
+        ...unassignedHandoff,
+        businessId: "biz-direct-return",
+        currentUserId: "user-me",
+      };
+      await act(async () => {
+        root.render(<ConversationDetail data={data} />);
+      });
+      const textarea = container.querySelector(
+        'textarea[aria-label="رد على العميل"]',
+      ) as HTMLTextAreaElement;
+      const draft = "مسودة يجب ألا تُمسح";
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      await act(async () => {
+        nativeSetter?.call(textarea, draft);
+        textarea.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+
+      const returnButton = container.querySelector(
+        'button[aria-label="إعادة للمساعد"]',
+      ) as HTMLButtonElement | null;
+      await act(async () => {
+        returnButton?.click();
+      });
+
+      expect(transitionConversation).toHaveBeenCalledTimes(1);
+      expect(transitionConversation).toHaveBeenCalledWith({
+        id: mockData.id,
+        transition: "RETURN_TO_AI",
+      });
+      expect(transitionConversation).not.toHaveBeenCalledWith({
+        id: mockData.id,
+        transition: "TAKE_OVER",
+      });
+      expect(textarea.value).toBe(draft);
+      const storedDraft = getStoredDraft(
+        "biz-direct-return",
+        "user-me",
+        mockData.id,
+      );
+      expect(storedDraft).toBe(draft);
+      expect(
+        container.querySelector(
+          '[aria-label="حالة المحادثة: يحتاج تدخلاً بشرياً"]',
+        ),
+      ).not.toBeNull();
+      expect(container.textContent).toContain("تعذر إعادة المحادثة للمساعد");
+      expect(
+        container.querySelector(
+          '[aria-label="حالة المحادثة: المساعد الذكي نشط"]',
+        ),
+      ).toBeNull();
+      root.unmount();
+    });
+
+    it("moves the unassigned thread to AI_ACTIVE after a successful direct return", async () => {
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(<ConversationDetail data={unassignedHandoff} />);
+      });
+      const returnButton = container.querySelector(
+        'button[aria-label="إعادة للمساعد"]',
+      ) as HTMLButtonElement | null;
+      await act(async () => {
+        returnButton?.click();
+      });
+      expect(transitionConversation).toHaveBeenCalledTimes(1);
+      expect(transitionConversation).toHaveBeenCalledWith({
+        id: mockData.id,
+        transition: "RETURN_TO_AI",
+      });
+      expect(
+        container.querySelector(
+          '[aria-label="حالة المحادثة: المساعد الذكي نشط"]',
+        ),
+      ).not.toBeNull();
+      root.unmount();
     });
   });
 

@@ -41,10 +41,14 @@ export type ConversationActionsProps = {
  * preventing diverging action logic or hidden controls.
  *
  * Exposes:
- * - Direct primary action (TAKE_OVER / RETURN_TO_AI)
+ * - Direct primary action(s): TAKE_OVER and/or RETURN_TO_AI
  * - Direct booking shortcut
  * - Mobile customer details toggle («التفاصيل»)
  * - Accessible «المزيد» menu for secondary actions (MARK_BOOKED, HANDOFF)
+ *
+ * An unassigned human handoff needs BOTH operator choices: take ownership, or
+ * return the thread directly to the assistant without a TAKE_OVER round-trip.
+ * Other states keep their existing single-action behavior.
  */
 export function ConversationActions({
   data,
@@ -52,22 +56,23 @@ export function ConversationActions({
   handleTransition,
   mobileTab,
   setMobileTab,
-  className = "flex flex-wrap items-center gap-1 sm:gap-1.5",
+  className = "flex flex-wrap items-center gap-0 sm:gap-1.5",
 }: ConversationActionsProps) {
-  const isTakeOver =
-    data.status === "AI_ACTIVE" ||
-    (data.status === "NEED_HUMAN" && !data.assignedUser);
+  const isUnassignedHumanHandoff =
+    data.status === "NEED_HUMAN" && !data.assignedUser;
+  const isTakeOver = data.status === "AI_ACTIVE" || isUnassignedHumanHandoff;
+  const showReturnToAi = !isTakeOver || isUnassignedHumanHandoff;
 
   const hasSecondaryActions = data.status !== "BOOKED";
 
   return (
     <div className={className}>
-      {/* 1. Primary Transition Action: TAKE_OVER or RETURN_TO_AI */}
+      {/* 1. Direct Transition Action(s): TAKE_OVER and/or RETURN_TO_AI */}
       {isTakeOver ? (
         <Button
           type="button"
           size="sm"
-          className="min-h-11 md:min-h-8 px-1.5 sm:px-2.5 gap-1 sm:gap-1.5 text-xs sm:text-sm"
+          className="min-h-11 md:min-h-8 px-0.5 sm:px-2 gap-0 sm:gap-1.5 text-xs sm:text-sm"
           onClick={() => handleTransition("TAKE_OVER")}
           disabled={isPending}
           aria-label="تولّي المحادثة"
@@ -75,12 +80,13 @@ export function ConversationActions({
           <UserRoundIcon className="hidden sm:inline size-4" aria-hidden />
           <span>تولّي المحادثة</span>
         </Button>
-      ) : (
+      ) : null}
+      {showReturnToAi ? (
         <Button
           type="button"
           size="sm"
           variant="outline"
-          className="min-h-11 md:min-h-8 px-1.5 sm:px-2.5 gap-1 sm:gap-1.5 text-xs sm:text-sm"
+          className="min-h-11 md:min-h-8 px-0.5 sm:px-2 gap-0 sm:gap-1.5 text-xs sm:text-sm"
           onClick={() => handleTransition("RETURN_TO_AI")}
           disabled={isPending}
           aria-label="إعادة للمساعد"
@@ -88,14 +94,14 @@ export function ConversationActions({
           <BotIcon className="hidden sm:inline size-4" aria-hidden />
           <span>إعادة للمساعد</span>
         </Button>
-      )}
+      ) : null}
 
       {/* 2. Booking Action Shortcut */}
       <Button
         asChild
         variant="outline"
         size="sm"
-        className="min-h-11 md:min-h-8 px-1.5 sm:px-2.5 gap-1 sm:gap-1.5 text-xs sm:text-sm"
+        className="min-h-11 md:min-h-8 px-0.5 sm:px-2 gap-0 sm:gap-1.5 text-xs sm:text-sm"
       >
         <Link
           href={`/appointments/new?customerId=${data.customer.id}`}
@@ -112,7 +118,7 @@ export function ConversationActions({
           type="button"
           variant={mobileTab === "context" ? "secondary" : "outline"}
           size="sm"
-          className="min-h-11 md:min-h-8 px-1.5 sm:px-2.5 lg:hidden gap-1 sm:gap-1.5 text-xs sm:text-sm"
+          className="min-h-11 md:min-h-8 px-0.5 sm:px-2 lg:hidden gap-0 sm:gap-1.5 text-xs sm:text-sm"
           onClick={() =>
             setMobileTab((current) =>
               current === "messages" ? "context" : "messages",
@@ -149,7 +155,7 @@ export function ConversationActions({
               type="button"
               variant="outline"
               size="sm"
-              className="min-h-11 md:min-h-8 px-1.5 sm:px-2.5 gap-1 text-xs"
+              className="min-h-11 md:min-h-8 px-0.5 sm:px-2 gap-0 text-xs"
               aria-label="المزيد من الإجراءات"
               disabled={isPending}
             >

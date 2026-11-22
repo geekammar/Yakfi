@@ -1,20 +1,49 @@
 # FlowPilot — Current State
 
-> **Tier 0 orientation snapshot — as of 19 November 2026.** Read with
-> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0F records the
-> authoritative service-catalog pricing repair candidate on top of current
-> `main`. Section 0D records the merged PR #95 request-scoped policy-failure
-> boundary and the read-only Render observation. Section 0E records the
-> refreshed Draft PR #88 durable-evidence candidate. Sections 0/00/0A/0B and
-> 1–9 retain prior release, R5, R6, Y83 and QA249/QA250 evidence unchanged.
-> The Render app is technically ready; Telegram cutover and live product
-> acceptance have not been performed.
+> **Tier 0 orientation snapshot — as of 22 November 2026.** Read with
+> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0G records the
+> direct-return-to-AI Draft PR #97 candidate for unassigned human handoffs.
+> Section 0F records merged/deployed PR #96 and its bounded three-case live
+> acceptance. Section 0D records the merged PR #95 request-scoped
+> policy-failure boundary and the read-only Render observation. Section 0E
+> records the refreshed Draft PR #88 durable-evidence candidate. Sections
+> 0/00/0A/0B and 1–9 retain prior release, R5, R6, Y83 and QA249/QA250
+> evidence unchanged. The Render runtime is deployed and serving `0.79.23`;
+> PR96's three bounded live cases are accepted. Full-product acceptance,
+> mobile acceptance, invoice reconciliation and comprehensive reliability are
+> not claimed; PR97 live UI acceptance has not been performed.
 
-## 0F. Authoritative service-catalog pricing repair (Draft PR, 0.79.23) — 22 November 2026
+## 0G. Direct Return to AI for unassigned human handoff (Draft PR, 0.79.24) — 22 November 2026
 
-- **Baseline verified:** current `main` is
-  `8dc01b866b5eb5e9855f94939e709602b48df07e` (`0.79.22`, PR #88 merged). The
-  unrelated durable-evidence branch/PR #88 was not reset or overwritten.
+- **Baseline:** current `main` is
+  `26a8272a92adef6e55ada903f02e86a27fa4c61a` (`0.79.23`, PR #96 merged). No
+  existing implementation branch/PR for this exact task was found.
+- **Change:** the shared `ConversationActions` component exposes BOTH
+  «تولّي المحادثة» and «إعادة للمساعد» for `NEED_HUMAN` + unassigned. Direct
+  return calls the existing `RETURN_TO_AI` transition once, never a
+  `TAKE_OVER` then return. Assigned handoff remains return-only, `AI_ACTIVE`
+  remains take-over-only, and `BOOKED`/other states are unchanged.
+- **Safety:** server transition, permissions, tenant boundaries, pending
+  disabling, truthful errors, draft preservation and the shared desktop/mobile
+  component are unchanged. No pricing, AI prompt, provider, schema, migration
+  or production data change.
+- **Verification:** focused JSDOM + responsive Playwright coverage; required CI
+  on the Draft PR HEAD is the authority. No merge, deploy, paid AI, Telegram
+  send or live conversation change.
+- **Status:** Draft PR #97; not merged and not deployed. Its live UI
+  acceptance has not been performed.
+
+## 0F. Authoritative service-catalog pricing repair (merged PR #96, 0.79.23) — 22 November 2026
+
+- **Merged and deployed:** PR #96 merged as
+  `26a8272a92adef6e55ada903f02e86a27fa4c61a` on
+  `8dc01b866b5eb5e9855f94939e709602b48df07e` (`0.79.22`), version `0.79.23`.
+  The merged tree is identical to reviewed final HEAD
+  `c23a3e5876ceb6f42b2826c98c422d1d6f670b63`. Render automatically deployed
+  `26a8272` / `0.79.23`; `/api/health/live` and `/api/health` returned HTTP
+  `200` with the exact SHA/version, `deploymentReady=true`,
+  `database=connected` and `missingEnvVars=[]`. No migration was required.
+  The unrelated durable-evidence branch/PR #88 was not reset or overwritten.
 - **Confirmed live failure:** conversation
   `b56c9e2c-cb33-4872-bfdd-82c9a11dea58`, customer message
   `7c70fb9c-6283-4d89-93ef-cf6c66cc6376`, trace
@@ -39,10 +68,28 @@
   declared `single`, or `null` when undeclared). `POLICY_REFUSED` copy is
   neutral about delivery; actual success/failure remains in the independent
   delivery indicator.
-- **Verification:** focused offline suites only; required CI on the Draft PR
-  HEAD is the authority. No merge, deploy, migration, paid AI call, Telegram
-  send or live-conversation modification was performed. Live retest requires
-  the operator's bounded Muse/real-channel procedure.
+- **Bounded live acceptance (three cases only):** Muse report
+  https://docs.google.com/document/d/1yNt1OOO2SHAoshlghk353a_L2PvsSAyV/edit
+  independently matched to Neon/Render evidence.
+- **Live case A — catalog pricing:** `AI_REPLY`, `AI_ACTIVE`,
+  `disclosureChannel=service.price`, `disclosureAllowed=true`,
+  `disclosureProposedScope=catalog`.
+- **Live case B — known single-service pricing:** `AI_REPLY`, `AI_ACTIVE`,
+  `disclosureProposedScope=single`.
+- **Live case C — absent service:** `AI_HANDOFF`,
+  `KNOWLEDGE_GAP_UNRESOLVED`.
+- **Live acceptance evidence:** all three had successful recorded delivery,
+  one recorded provider attempt and one HTTP dispatch each, persisted
+  execution/attempt evidence, and `COMPLETE` turn cost coverage. Total
+  provider-reported model cost: **USD 0.000723727464**.
+- **Acceptance scope:** this accepts only the three cases above. It does **not**
+  claim full-product acceptance, mobile acceptance, invoice reconciliation,
+  comprehensive reliability or PR97 live UI acceptance. PR97 remains a Draft
+  candidate until separately merged/deployed.
+- **Merged CI:** final reviewed HEAD `c23a3e5` passed run `44984694343` (PR
+  Quality Gates & Browser UX QA). No merge, deploy, migration, paid AI call,
+  Telegram send or live-conversation modification was performed by this
+  documentation correction.
 
 ## 0D. PR #95 merged: request-scoped policy fail-closed — 19 November 2026
 
