@@ -564,9 +564,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         'button[aria-label="إعادة للمساعد"]',
       );
       act(() => {
-        returnButton?.dispatchEvent(
-          new MouseEvent("click", { bubbles: true }),
-        );
+        returnButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       });
       expect(handleTransition).toHaveBeenCalledTimes(1);
       expect(handleTransition).toHaveBeenCalledWith("RETURN_TO_AI");
@@ -641,9 +639,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         'button[aria-label="إعادة للمساعد"]',
       );
       await act(async () => {
-        returnButton?.dispatchEvent(
-          new MouseEvent("click", { bubbles: true }),
-        );
+        returnButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       });
 
       expect(transitionConversation).toHaveBeenCalledTimes(1);
@@ -682,9 +678,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         'button[aria-label="إعادة للمساعد"]',
       );
       await act(async () => {
-        returnButton?.dispatchEvent(
-          new MouseEvent("click", { bubbles: true }),
-        );
+        returnButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       });
       expect(transitionConversation).toHaveBeenCalledTimes(1);
       expect(transitionConversation).toHaveBeenCalledWith({
