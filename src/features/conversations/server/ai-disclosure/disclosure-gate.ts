@@ -855,11 +855,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         );
       }
       if (matches.length > 1) {
-        return refuse(
-          "AMBIGUOUS_MATCH",
-          aggregateRecord ?? null,
-          "AMBIGUOUS",
-        );
+        return refuse("AMBIGUOUS_MATCH", aggregateRecord ?? null, "AMBIGUOUS");
       }
       const matchedService = matches[0]!;
       const record = ledger.find(
@@ -912,11 +908,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         );
       }
       if (matches.length > 1) {
-        return refuse(
-          "AMBIGUOUS_MATCH",
-          aggregateRecord ?? null,
-          "AMBIGUOUS",
-        );
+        return refuse("AMBIGUOUS_MATCH", aggregateRecord ?? null, "AMBIGUOUS");
       }
       const matchedService = matches[0]!;
       const record = ledger.find(

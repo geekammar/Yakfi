@@ -427,19 +427,27 @@ function main(): void {
     catalogServices.length === 4 &&
       !catalogServices.some((service) => service.name === "خدمة موقوفة"),
   );
+  const fixedService = catalogServices.find(
+    (service) => service.name === "تنظيف الأسنان",
+  );
+  const rangeService = catalogServices.find(
+    (service) => service.name === "حشو العصب",
+  );
+  const conditionalService = catalogServices.find(
+    (service) => service.name === "جلسة تجميلية",
+  );
+  const unpricedService = catalogServices.find(
+    (service) => service.name === "كشف جراحة",
+  );
   check(
     "الظهور: الأشكال الثابتة والنطاق والحسب-حالة تُنسّق كما هي",
-    catalogServices.find((service) => service.name === "تنظيف الأسنان")
-      ?.price === "300 جنيه" &&
-      catalogServices.find((service) => service.name === "حشو العصب")
-        ?.price === "من 350 إلى 600 جنيه" &&
-      catalogServices.find((service) => service.name === "جلسة تجميلية")
-        ?.price === "حسب الحالة",
+    fixedService?.price === "300 جنيه" &&
+      rangeService?.price === "من 350 إلى 600 جنيه" &&
+      conditionalService?.price === "حسب الحالة",
   );
   check(
     "الظهور: الخدمة بلا سعر لا تحمل سعراً مُختلقاً داخل الكتالوج",
-    catalogServices.find((service) => service.name === "كشف جراحة")?.price ===
-      undefined,
+    unpricedService?.price === undefined,
   );
   const catalogPriceFamily = catalogPriceTurn.facts.find(
     (fact) => fact.key === "service.price",
