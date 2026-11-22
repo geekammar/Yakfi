@@ -772,10 +772,7 @@ async function main(): Promise<void> {
           }) as AiResponse,
       ],
     });
-    const resultFailed = await hFailed.run(
-      "كم سعر الجلسة عندكم؟",
-      "e6-fail",
-    );
+    const resultFailed = await hFailed.run("كم سعر الجلسة عندكم؟", "e6-fail");
     const rowFailed = hFailed.attention.get(hFailed.conversation!.id);
     check(
       "E6-c. POLICY_REFUSED مع فشل الإرسال: لا ادعاء نجاح، ومؤشر الفشل القائم يبقى متاحاً",
