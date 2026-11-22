@@ -550,7 +550,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       const { root, handleTransition } = renderActions(unassignedHandoff);
       const returnButton = container.querySelector(
         'button[aria-label="إعادة للمساعد"]',
-      );
+      ) as HTMLButtonElement | null;
       act(() => {
         returnButton?.click();
       });
@@ -625,7 +625,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
 
       const returnButton = container.querySelector(
         'button[aria-label="إعادة للمساعد"]',
-      );
+      ) as HTMLButtonElement | null;
       await act(async () => {
         returnButton?.click();
       });
@@ -667,7 +667,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       });
       const returnButton = container.querySelector(
         'button[aria-label="إعادة للمساعد"]',
-      );
+      ) as HTMLButtonElement | null;
       await act(async () => {
         returnButton?.click();
       });
