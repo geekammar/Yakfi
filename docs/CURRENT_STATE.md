@@ -70,14 +70,18 @@
   delivery indicator.
 - **Bounded live acceptance (three cases only):** Muse report
   https://docs.google.com/document/d/1yNt1OOO2SHAoshlghk353a_L2PvsSAyV/edit
-  independently matched to Neon/Render evidence:
-  - **A — catalog pricing:** `AI_REPLY`, `AI_ACTIVE`, `disclosureChannel=service.price`, `disclosureAllowed=true`, `disclosureProposedScope=catalog`.
-  - **B — known single-service pricing:** `AI_REPLY`, `AI_ACTIVE`, `disclosureProposedScope=single`.
-  - **C — absent service:** `AI_HANDOFF`, `KNOWLEDGE_GAP_UNRESOLVED`.
-  All three had successful recorded delivery, one recorded provider attempt and
-  one HTTP dispatch each, persisted execution/attempt evidence, and `COMPLETE`
-  turn cost coverage. Total provider-reported model cost:
-  **USD 0.000723727464**.
+  independently matched to Neon/Render evidence.
+- **Live case A — catalog pricing:** `AI_REPLY`, `AI_ACTIVE`,
+  `disclosureChannel=service.price`, `disclosureAllowed=true`,
+  `disclosureProposedScope=catalog`.
+- **Live case B — known single-service pricing:** `AI_REPLY`, `AI_ACTIVE`,
+  `disclosureProposedScope=single`.
+- **Live case C — absent service:** `AI_HANDOFF`,
+  `KNOWLEDGE_GAP_UNRESOLVED`.
+- **Live acceptance evidence:** all three had successful recorded delivery,
+  one recorded provider attempt and one HTTP dispatch each, persisted
+  execution/attempt evidence, and `COMPLETE` turn cost coverage. Total
+  provider-reported model cost: **USD 0.000723727464**.
 - **Acceptance scope:** this accepts only the three cases above. It does **not**
   claim full-product acceptance, mobile acceptance, invoice reconciliation,
   comprehensive reliability or PR97 live UI acceptance. PR97 remains a Draft
