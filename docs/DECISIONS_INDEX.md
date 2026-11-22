@@ -136,6 +136,7 @@ conflict is unclear, escalate instead of guessing (`docs/AGENT_RULES.md` §6).
 | 118 | PR88 reconciliation completeness: unresolved usage/identity/conflicts/contradictory no-call block complete totals; known subtotals remain; repeatable-read snapshot; known other-pool links excluded | durable evidence reconciliation/completeness/conflicts/snapshot | [#118](DECISIONS.md) |
 | 119 | Authoritative service-catalog pricing: typed `service.price` catalog scope, truthful missing-price rendering, exact single-service ids preserved, refusal diagnostics report the evaluated family/source outcome | service-catalog price questions/service.price gate/refusal evidence | [#119](DECISIONS.md) |
 | 120 | PR96 focused repair: successful `service.price` evidence carries the canonical evaluated scope; `POLICY_REFUSED` copy is neutral about delivery and leaves actual status to the existing indicator | successful scope evidence/POLICY_REFUSED copy | [#120](DECISIONS.md) |
+| 121 | Direct Return to AI for unassigned human handoff: shared actions expose both take-over and return; return calls `RETURN_TO_AI` directly once, other states unchanged | unassigned NEED_HUMAN actions/direct return | [#121](DECISIONS.md) |
 
 ## Historical decisions (never load unless doing forensics)
 

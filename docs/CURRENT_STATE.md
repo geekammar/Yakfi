@@ -1,14 +1,33 @@
 # FlowPilot — Current State
 
 > **Tier 0 orientation snapshot — as of 19 November 2026.** Read with
-> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0F records the
-> authoritative service-catalog pricing repair candidate on top of current
-> `main`. Section 0D records the merged PR #95 request-scoped policy-failure
+> `docs/AGENT_RULES.md` and `docs/DECISIONS_INDEX.md`. Section 0G records the
+> direct-return-to-AI candidate for unassigned human handoffs. Section 0F
+> records the merged PR #96 authoritative service-catalog pricing repair.
+> Section 0D records the merged PR #95 request-scoped policy-failure
 > boundary and the read-only Render observation. Section 0E records the
 > refreshed Draft PR #88 durable-evidence candidate. Sections 0/00/0A/0B and
 > 1–9 retain prior release, R5, R6, Y83 and QA249/QA250 evidence unchanged.
 > The Render app is technically ready; Telegram cutover and live product
 > acceptance have not been performed.
+
+## 0G. Direct Return to AI for unassigned human handoff (Draft PR, 0.79.24) — 22 November 2026
+
+- **Baseline:** current `main` is
+  `26a8272a92adef6e55ada903f02e86a27fa4c61a` (`0.79.23`, PR #96 merged). No
+  existing implementation branch/PR for this exact task was found.
+- **Change:** the shared `ConversationActions` component exposes BOTH
+  «تولّي المحادثة» and «إعادة للمساعد» for `NEED_HUMAN` + unassigned. Direct
+  return calls the existing `RETURN_TO_AI` transition once, never a
+  `TAKE_OVER` then return. Assigned handoff remains return-only, `AI_ACTIVE`
+  remains take-over-only, and `BOOKED`/other states are unchanged.
+- **Safety:** server transition, permissions, tenant boundaries, pending
+  disabling, truthful errors, draft preservation and the shared desktop/mobile
+  component are unchanged. No pricing, AI prompt, provider, schema, migration
+  or production data change.
+- **Verification:** focused JSDOM + responsive Playwright coverage; required CI
+  on the Draft PR HEAD is the authority. No merge, deploy, paid AI, Telegram
+  send or live conversation change.
 
 ## 0F. Authoritative service-catalog pricing repair (Draft PR, 0.79.23) — 22 November 2026
 

@@ -1,5 +1,28 @@
 # FlowPilot — Build State
 
+## Direct Return to AI for unassigned human handoff (Draft PR, v0.79.24) — 22 November 2026
+
+- **Baseline:** current `main` `26a8272a92adef6e55ada903f02e86a27fa4c61a`
+  (`0.79.23`, PR #96 merged). No existing direct-return implementation branch
+  or PR was found; no work was reset or duplicated.
+- **Behavior:** the shared `ConversationActions` component now exposes BOTH
+  «تولّي المحادثة» and «إعادة للمساعد» when a conversation is `NEED_HUMAN` and
+  unassigned. The return control calls the existing `RETURN_TO_AI` transition
+  directly, once; it never performs `TAKE_OVER` first. Assigned human handoff
+  keeps return-only, `AI_ACTIVE` keeps take-over-only, and `BOOKED`/other
+  states keep their prior action.
+- **Preserved:** existing server transition/permissions/tenant boundaries,
+  pending disabling of the direct actions, error display without false
+  success, draft preservation on failed transitions, and the shared
+  desktop/mobile header component.
+- **Tests:** focused JSDOM regressions cover both actions, direct
+  `RETURN_TO_AI` (no `TAKE_OVER`), pending disablement, failed-transition
+  draft/status/error behavior, successful direct return, and unchanged
+  assigned/AI_ACTIVE behavior; the responsive header Playwright fixture now
+  asserts both actions for the unassigned handoff.
+- **Not done:** no pricing, AI prompt, provider, schema, migration, seed,
+  production data, paid AI, Telegram, deploy or merge change.
+
 ## Authoritative service-catalog pricing repair (Draft PR, v0.79.23) — 22 November 2026
 
 - **Baseline:** current `main` `8dc01b866b5eb5e9855f94939e709602b48df07e`

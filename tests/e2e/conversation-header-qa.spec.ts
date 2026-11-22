@@ -23,6 +23,7 @@ const FIXTURES = [
     expectedStatusText: "بانتظار موظف",
     expectedAssigneeText: "غير معينة",
     expectedPrimaryActionLabel: "تولّي المحادثة",
+    expectsReturnAction: true,
     hasAttentionChip: true,
     hasMoreMenu: true,
   },
@@ -32,6 +33,7 @@ const FIXTURES = [
     expectedStatusText: "نشط",
     expectedAssigneeText: "المساعد الذكي",
     expectedPrimaryActionLabel: "تولّي المحادثة",
+    expectsReturnAction: false,
     hasAttentionChip: false,
     hasMoreMenu: true,
   },
@@ -41,6 +43,7 @@ const FIXTURES = [
     expectedStatusText: "بانتظار موظف",
     expectedAssigneeText: "أنت",
     expectedPrimaryActionLabel: "إعادة للمساعد",
+    expectsReturnAction: false,
     hasAttentionChip: false,
     hasMoreMenu: true,
   },
@@ -50,6 +53,7 @@ const FIXTURES = [
     expectedStatusText: "بانتظار موظف",
     expectedAssigneeText: "سارة المديرة",
     expectedPrimaryActionLabel: "إعادة للمساعد",
+    expectsReturnAction: false,
     hasAttentionChip: false,
     hasMoreMenu: true,
   },
@@ -59,6 +63,7 @@ const FIXTURES = [
     expectedStatusText: "محجوز",
     expectedAssigneeText: "غير معينة",
     expectedPrimaryActionLabel: "إعادة للمساعد",
+    expectsReturnAction: false,
     hasAttentionChip: false,
     hasMoreMenu: false, // In BOOKED state, secondary actions menu is not shown
   },
@@ -157,13 +162,29 @@ test.describe("Focused Responsive Conversation Header & Direct Actions QA", () =
       }
 
       // 4. Primary direct action is directly visible without opening details
-      const primaryAction = persistentHeader.locator(
-        'button[aria-label="تولّي المحادثة"], button[aria-label="إعادة للمساعد"]',
+      const takeOverAction = persistentHeader.locator(
+        'button[aria-label="تولّي المحادثة"]',
       );
+      const returnAction = persistentHeader.locator(
+        'button[aria-label="إعادة للمساعد"]',
+      );
+      const primaryAction =
+        fixture.expectedPrimaryActionLabel === "تولّي المحادثة"
+          ? takeOverAction
+          : returnAction;
       await expect(primaryAction).toBeVisible();
       if (fixture.expectedPrimaryActionLabel === "تولّي المحادثة") {
         // Must show complete visible label «تولّي المحادثة» at every viewport
-        await expect(primaryAction).toContainText("تولّي المحادثة");
+        await expect(takeOverAction).toContainText("تولّي المحادثة");
+        await expect(returnAction).toHaveCount(
+          fixture.expectsReturnAction ? 1 : 0,
+        );
+        if (fixture.expectsReturnAction) {
+          await expect(returnAction).toContainText("إعادة للمساعد");
+        }
+      } else {
+        await expect(takeOverAction).toHaveCount(0);
+        await expect(returnAction).toContainText("إعادة للمساعد");
       }
       const primaryBox = await primaryAction.boundingBox();
       expect(primaryBox).not.toBeNull();

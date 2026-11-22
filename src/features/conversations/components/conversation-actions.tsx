@@ -41,10 +41,14 @@ export type ConversationActionsProps = {
  * preventing diverging action logic or hidden controls.
  *
  * Exposes:
- * - Direct primary action (TAKE_OVER / RETURN_TO_AI)
+ * - Direct primary action(s): TAKE_OVER and/or RETURN_TO_AI
  * - Direct booking shortcut
  * - Mobile customer details toggle («التفاصيل»)
  * - Accessible «المزيد» menu for secondary actions (MARK_BOOKED, HANDOFF)
+ *
+ * An unassigned human handoff needs BOTH operator choices: take ownership, or
+ * return the thread directly to the assistant without a TAKE_OVER round-trip.
+ * Other states keep their existing single-action behavior.
  */
 export function ConversationActions({
   data,
@@ -54,15 +58,16 @@ export function ConversationActions({
   setMobileTab,
   className = "flex flex-wrap items-center gap-1 sm:gap-1.5",
 }: ConversationActionsProps) {
-  const isTakeOver =
-    data.status === "AI_ACTIVE" ||
-    (data.status === "NEED_HUMAN" && !data.assignedUser);
+  const isUnassignedHumanHandoff =
+    data.status === "NEED_HUMAN" && !data.assignedUser;
+  const isTakeOver = data.status === "AI_ACTIVE" || isUnassignedHumanHandoff;
+  const showReturnToAi = !isTakeOver || isUnassignedHumanHandoff;
 
   const hasSecondaryActions = data.status !== "BOOKED";
 
   return (
     <div className={className}>
-      {/* 1. Primary Transition Action: TAKE_OVER or RETURN_TO_AI */}
+      {/* 1. Direct Transition Action(s): TAKE_OVER and/or RETURN_TO_AI */}
       {isTakeOver ? (
         <Button
           type="button"
@@ -75,7 +80,8 @@ export function ConversationActions({
           <UserRoundIcon className="hidden sm:inline size-4" aria-hidden />
           <span>تولّي المحادثة</span>
         </Button>
-      ) : (
+      ) : null}
+      {showReturnToAi ? (
         <Button
           type="button"
           size="sm"
@@ -88,7 +94,7 @@ export function ConversationActions({
           <BotIcon className="hidden sm:inline size-4" aria-hidden />
           <span>إعادة للمساعد</span>
         </Button>
-      )}
+      ) : null}
 
       {/* 2. Booking Action Shortcut */}
       <Button
