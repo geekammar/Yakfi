@@ -2711,6 +2711,19 @@ async function runSuite(): Promise<void> {
         !hPrice.getSent()[0]!.includes("999"),
       { resPrice, sent: hPrice.getSent() },
     );
+    const priceEvidence = buildTurnEvidence(resPrice, {
+      environment: "test",
+      appVersion: "0.0.0",
+      emittedAt: now,
+    });
+    check(
+      "15.E1 Undeclared single-service scope stays null and allowed, not fabricated catalog",
+      priceEvidence.disclosureChannel === "service.price" &&
+        priceEvidence.disclosureAllowed === true &&
+        priceEvidence.disclosureProposedScope === null &&
+        priceEvidence.disclosureRefusalReason === null,
+      priceEvidence,
+    );
 
     // 15.E2 Aggregate catalog + prices via the explicit typed catalog scope:
     // one authoritative server-rendered list, all active services, stored
@@ -2822,6 +2835,20 @@ async function runSuite(): Promise<void> {
         hCatalogPrice.getAppointmentWrites() === 0 &&
         hCatalogPrice.getAttention().size === 0,
       { resCatalogPrice, sentCatalogPrice },
+    );
+    const catalogPriceEvidence = buildTurnEvidence(resCatalogPrice, {
+      environment: "test",
+      appVersion: "0.0.0",
+      emittedAt: now,
+    });
+    check(
+      "15.E3 Successful catalog reply exposes allowed service.price + catalog scope evidence",
+      catalogPriceEvidence.disclosureChannel === "service.price" &&
+        catalogPriceEvidence.disclosureAllowed === true &&
+        catalogPriceEvidence.disclosureProposedScope === "catalog" &&
+        catalogPriceEvidence.disclosureProposedFamily === null &&
+        catalogPriceEvidence.disclosureRefusalReason === null,
+      catalogPriceEvidence,
     );
 
     // 15.F Missing service price or a cross-tenant source: no fabricated

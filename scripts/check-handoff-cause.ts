@@ -326,6 +326,7 @@ async function main(): Promise<void> {
     }>;
     faqs?: Array<{ question: string; answer: string }>;
     services?: unknown[];
+    transportDelivered?: boolean;
   }) {
     const businessId = opts.businessId ?? BUSINESS_A;
     const conversationId =
@@ -577,7 +578,10 @@ async function main(): Promise<void> {
         providerName: "scripted",
         async send(input: { content: string }) {
           sent.push(input.content);
-          return { provider: "scripted", delivered: true };
+          return {
+            provider: "scripted",
+            delivered: opts.transportDelivered ?? true,
+          };
         },
       },
     } as unknown as ConversationEngineDeps;
@@ -742,18 +746,46 @@ async function main(): Promise<void> {
         row?.cause === "POLICY_REFUSED" &&
         !h.sent.some((text) => text.includes("500")),
     );
+    const policyCopy = cause.describeHandoffCause("POLICY_REFUSED");
     check(
-      "E6-b. POLICY_REFUSED لا يعني فشل الإرسال: الرد الآمن وصل فعلاً",
+      "E6-b. POLICY_REFUSED مع نجاح الإرسال: الحالة المستقلة تُظهر النجاح بلا ادعاء في السبب",
       isSuccess(result) &&
         result.delivery?.delivered === true &&
         h.sent.length === 1 &&
         result.handoffCause === "POLICY_REFUSED" &&
-        cause
-          .describeHandoffCause("POLICY_REFUSED")
-          .includes("تم إرسال رد آمن") &&
-        !/فشل|تعذّر الإرسال|لم يتم الإرسال/.test(
-          cause.describeHandoffCause("POLICY_REFUSED"),
-        ),
+        !/تم إرسال|أُرسل|أرسلنا|وصل|تسليم|إرسال/.test(policyCopy),
+    );
+    const hFailed = makeHarness({
+      faqs: [],
+      services: [],
+      transportDelivered: false,
+      responders: [
+        async () =>
+          ({
+            intent: "FAQ",
+            safetyAssessment: "safe",
+            action: "reply",
+            content: "الأسعار تبدأ من 500 جنيه للجلسة الواحدة.",
+            extraction: emptyExtraction,
+            handoffReason: null,
+            summary: null,
+          }) as AiResponse,
+      ],
+    });
+    const resultFailed = await hFailed.run(
+      "كم سعر الجلسة عندكم؟",
+      "e6-fail",
+    );
+    const rowFailed = hFailed.attention.get(hFailed.conversation!.id);
+    check(
+      "E6-c. POLICY_REFUSED مع فشل الإرسال: لا ادعاء نجاح، ومؤشر الفشل القائم يبقى متاحاً",
+      isSuccess(resultFailed) &&
+        resultFailed.conversationStatus === "NEED_HUMAN" &&
+        resultFailed.handoffCause === "POLICY_REFUSED" &&
+        resultFailed.delivery?.delivered === false &&
+        rowFailed?.cause === "POLICY_REFUSED" &&
+        hFailed.sent.length === 1 &&
+        !/تم إرسال|أُرسل|أرسلنا|وصل|تسليم|إرسال/.test(policyCopy),
     );
   }
 

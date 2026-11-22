@@ -265,6 +265,13 @@ export type DisclosureResult =
        * is never emitted to customers.
        */
       readonly renderedContent?: string;
+      /**
+       * The typed scope the canonical proposal resolver evaluated for this
+       * successful reply (null when none was declared). Only service.price
+       * accepts a meaningful scope; other successful families cannot carry one
+       * because a scope on them is rejected as a conflict.
+       */
+      readonly evaluatedScope?: KnowledgeScope | null;
     }
   | {
       readonly kind: "requires-human";
@@ -828,6 +835,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
           kind: "disclosed",
           response,
           support: ["service.price"],
+          evaluatedScope: proposal.scope,
           renderedContent: buildServiceCatalogPriceContent(
             context.request.services,
           ),
@@ -879,6 +887,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         kind: "disclosed",
         response,
         support: ["service.price"],
+        evaluatedScope: proposal.scope,
         renderedContent: buildServicePriceContent(
           matchedService.name,
           matchedService.price,

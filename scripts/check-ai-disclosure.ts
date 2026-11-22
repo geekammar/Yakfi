@@ -451,6 +451,12 @@ async function main(): Promise<void> {
           ? priceTurn.decision.renderedContent
           : null,
         "سعر تنظيف الأسنان: 300 جنيه.",
+      ) &&
+      eq(
+        priceTurn.decision.kind === "disclosed"
+          ? priceTurn.decision.evaluatedScope
+          : undefined,
+        null,
       ),
   );
   const priceNameSourceTurn = gateReply({
@@ -618,7 +624,13 @@ async function main(): Promise<void> {
       catalogPriceContent.includes("تنظيف الأسنان") &&
       catalogPriceContent.includes("حشو العصب") &&
       catalogPriceContent.includes("جلسة تجميلية") &&
-      catalogPriceContent.includes("كشف جراحة"),
+      catalogPriceContent.includes("كشف جراحة") &&
+      eq(
+        catalogPriceTurn.decision.kind === "disclosed"
+          ? catalogPriceTurn.decision.evaluatedScope
+          : undefined,
+        "catalog",
+      ),
   );
   check(
     "1f7. الأسعار الثابتة والنطاق والحسب-حالة تُنقل بمعناها المخزّن بلا اختراع",
@@ -798,6 +810,38 @@ async function main(): Promise<void> {
           ? missingStoredPriceTurn.decision.diagnostics.sourceReference
           : null,
         "MATCHED",
+      ),
+  );
+
+  const explicitSingleScopeTurn = gateReply({
+    message: "كم سعر تنظيف الأسنان؟",
+    sources: {
+      business: businessSources({ faqs: [] }),
+      services: [
+        serviceFact(pricedServiceName, {
+          priceType: "FIXED",
+          priceAmount: 300,
+          priceCurrency: "EGP",
+        }),
+      ],
+    },
+    reply: replyOf("FAQ", "سعر تنظيف الأسنان 300 جنيه.", {
+      requiredKnowledge: "service.price",
+      knowledgeRef: {
+        family: "service.price",
+        scope: "single",
+        sourceId: pricedServiceId,
+      },
+    }),
+  });
+  check(
+    "1f14. مدى single المُعلن مع المعرف الدقيق = يُفصح ويحمل evaluatedScope=single",
+    eq(explicitSingleScopeTurn.decision.kind, "disclosed") &&
+      eq(
+        explicitSingleScopeTurn.decision.kind === "disclosed"
+          ? explicitSingleScopeTurn.decision.evaluatedScope
+          : undefined,
+        "single",
       ),
   );
 

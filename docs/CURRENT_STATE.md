@@ -32,10 +32,13 @@
   id; unknown/foreign/ambiguous references, inactive services, other tenants
   and off-task price families stay refused. No second resolver, renderer,
   prompt intent rule or cost engine was added.
-- **Diagnostics:** refusal evidence now carries the actual resolved family in
+- **Diagnostics:** refusal evidence carries the actual resolved family in
   `disclosureChannel` (including `service.price`), plus typed
-  `disclosureProposedScope` and `disclosureSourceReference`. `POLICY_REFUSED`
-  states that a safe reply was delivered and does not imply transport failure.
+  `disclosureProposedScope` and `disclosureSourceReference`. Successful
+  `service.price` decisions also carry the evaluated scope (`catalog`, a
+  declared `single`, or `null` when undeclared). `POLICY_REFUSED` copy is
+  neutral about delivery; actual success/failure remains in the independent
+  delivery indicator.
 - **Verification:** focused offline suites only; required CI on the Draft PR
   HEAD is the authority. No merge, deploy, migration, paid AI call, Telegram
   send or live-conversation modification was performed. Live retest requires

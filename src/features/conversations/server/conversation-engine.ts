@@ -9362,8 +9362,9 @@ async function runInboundTurn(
             : (disclosure.diagnostics.proposedFamily ?? "unresolved"),
         allowed: disclosure.kind === "disclosed",
         declaredIntent: validated.intent,
-        ...(disclosure.kind === "requires-human"
-          ? {
+        ...(disclosure.kind === "disclosed"
+          ? { proposedScope: disclosure.evaluatedScope ?? null }
+          : {
               refusalReason: disclosure.reason,
               proposedFamily: disclosure.diagnostics.proposedFamily,
               proposalStatus: disclosure.diagnostics.proposalStatus,
@@ -9371,8 +9372,7 @@ async function runInboundTurn(
               sourceReference: disclosure.diagnostics.sourceReference,
               ledgerIncluded: disclosure.diagnostics.ledgerIncluded,
               ledgerDisclosable: disclosure.diagnostics.ledgerDisclosable,
-            }
-          : {}),
+            }),
       },
     };
     if (disclosure.kind !== "disclosed") {

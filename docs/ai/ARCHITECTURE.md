@@ -837,8 +837,11 @@ the bounded `sourceReference` outcome (`NONE` · `MATCHED` · `UNKNOWN` ·
 gate ACTUALLY evaluated: the backing family on a disclosure, or the resolved
 proposed family (closed `UNKNOWN`, or `unresolved` when no family was
 declared) on a refusal. It never falls back to the intent-derived FAQ family
-for a price/catalog refusal. No raw model label, source id, reply text, source
-content, customer text or secret enters evidence.
+for a price/catalog refusal. On a successful `service.price` decision the same
+`disclosureProposedScope` field carries the scope the canonical resolver
+evaluated (`catalog`, a declared `single`, or `null` when undeclared); other
+successful families carry no meaningful scope. No raw model label, source id,
+reply text, source content, customer text or secret enters evidence.
 
 Guard: `pnpm check:ai-disclosure`, `pnpm check:unknown-information-handoff`
 (including the new knowledge-family/availability/evidence cases) and

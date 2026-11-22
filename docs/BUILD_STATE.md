@@ -18,17 +18,23 @@
   «السعر غير متاح — يحتاج تأكيد من الفريق» instead of being omitted or
   invented. Exact single-service price, unknown/foreign/ambiguous references,
   inactive rows, tenant scope and the price task gate are unchanged.
-- **Diagnostics:** refusals now report the family actually evaluated in
+- **Diagnostics:** refusals report the family actually evaluated in
   `disclosureChannel` (no generic-FAQ fallback for a price/catalog refusal),
   plus bounded `disclosureProposedScope` and `disclosureSourceReference`
-  outcomes. `POLICY_REFUSED` operator copy states that a safe reply was sent
-  and does not imply a delivery failure.
+  outcomes. Successful `service.price` decisions now carry the scope the
+  canonical resolver evaluated (`catalog`, a declared `single`, or `null` when
+  undeclared), so a successful catalog reply is visible in turn evidence.
+  `POLICY_REFUSED` operator copy is neutral about delivery and describes only
+  the authoritative-source refusal plus required human follow-up; actual
+  delivery success/failure stays in the independent delivery indicator.
 - **Tests:** focused cases in `check:ai-disclosure`, `check:service-price`,
   `check:unknown-information-handoff`, `check:turn-evidence` and
-  `check:handoff-cause`, including catalog scope with fixed/range/conditional/
+  `check:handoff-cause`, including catalog success scope evidence, undeclared
+  and explicit single scope, catalog scope with fixed/range/conditional/
   missing prices, exact single-service ids, source conflicts, empty/inactive/
-  cross-tenant catalogs, truthfully resolved refusal channels, and a refusal
-  with successful delivery. Required CI on the PR HEAD is the authority.
+  cross-tenant catalogs, truthfully resolved refusal channels, and
+  `POLICY_REFUSED` with both successful and failed delivery. Required CI on
+  the PR HEAD is the authority.
 - **Not done:** no merge, deploy, migration, paid AI call, Telegram send,
   conversation reset or production write.
 

@@ -116,7 +116,11 @@ export type TurnDisclosureObservation = {
   readonly proposedFamily?: ProposedKnowledgeFamilyObservation;
   /** Additive refusal evidence: how the family proposal resolved. */
   readonly proposalStatus?: DisclosureProposalStatus;
-  /** Additive refusal evidence: the declared typed scope, when present. */
+  /**
+   * Additive scope evidence: on a refusal the declared proposal scope; on a
+   * successful `service.price` reply the scope the canonical resolver
+   * evaluated. Null when none was declared/evaluated.
+   */
   readonly proposedScope?: KnowledgeScope | null;
   /** Additive refusal evidence: the bounded source-reference outcome. */
   readonly sourceReference?: DisclosureSourceReference;
