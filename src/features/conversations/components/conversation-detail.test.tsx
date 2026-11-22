@@ -520,26 +520,14 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
       assignedUser: null,
     };
 
-    type TransitionAction =
-      | "TAKE_OVER"
-      | "RETURN_TO_AI"
-      | "MARK_BOOKED"
-      | "HANDOFF";
-
-    function renderActions(
-      data: ConversationDetailData,
-      options: {
-        isPending?: boolean;
-        onTransition?: (transition: TransitionAction) => void;
-      } = {},
-    ) {
+    function renderActions(data: ConversationDetailData, isPending = false) {
       const root = createRoot(container);
-      const handleTransition = options.onTransition ?? vi.fn();
+      const handleTransition = vi.fn();
       act(() => {
         root.render(
           <ConversationActions
             data={data}
-            isPending={options.isPending ?? false}
+            isPending={isPending}
             handleTransition={handleTransition}
           />,
         );
@@ -564,7 +552,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         'button[aria-label="إعادة للمساعد"]',
       );
       act(() => {
-        returnButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        returnButton?.click();
       });
       expect(handleTransition).toHaveBeenCalledTimes(1);
       expect(handleTransition).toHaveBeenCalledWith("RETURN_TO_AI");
@@ -573,7 +561,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
     });
 
     it("disables both direct actions while a transition is pending", () => {
-      const { root } = renderActions(unassignedHandoff, { isPending: true });
+      const { root } = renderActions(unassignedHandoff, true);
       const takeOver = container.querySelector(
         'button[aria-label="تولّي المحادثة"]',
       ) as HTMLButtonElement | null;
@@ -639,7 +627,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         'button[aria-label="إعادة للمساعد"]',
       );
       await act(async () => {
-        returnButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        returnButton?.click();
       });
 
       expect(transitionConversation).toHaveBeenCalledTimes(1);
@@ -652,9 +640,12 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         transition: "TAKE_OVER",
       });
       expect(textarea.value).toBe(draft);
-      expect(getStoredDraft("biz-direct-return", "user-me", mockData.id)).toBe(
-        draft,
+      const storedDraft = getStoredDraft(
+        "biz-direct-return",
+        "user-me",
+        mockData.id,
       );
+      expect(storedDraft).toBe(draft);
       expect(
         container.querySelector(
           '[aria-label="حالة المحادثة: يحتاج تدخلاً بشرياً"]',
@@ -678,7 +669,7 @@ describe("ConversationDetail Component (CONV-UI-01)", () => {
         'button[aria-label="إعادة للمساعد"]',
       );
       await act(async () => {
-        returnButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        returnButton?.click();
       });
       expect(transitionConversation).toHaveBeenCalledTimes(1);
       expect(transitionConversation).toHaveBeenCalledWith({
