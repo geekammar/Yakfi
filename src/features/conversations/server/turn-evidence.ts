@@ -27,7 +27,8 @@
  *   providerStatus · providerLatencyMs · inputTokens · outputTokens ·
  *   parseSuccess · disclosureChannel · disclosureAllowed ·
  *   disclosureRefusalReason · disclosureDeclaredIntent ·
- *   disclosureProposedFamily · disclosureProposalStatus ·
+ *   disclosureProposedFamily · disclosureProposedScope ·
+ *   disclosureProposalStatus · disclosureSourceReference ·
  *   disclosureLedgerIncluded · disclosureLedgerDisclosable ·
  *   knowledgeGapCategory · finalOutcome · outboundSendAttempted ·
  *   outboundSendDelivered · outboundDeliveryErrorCode · emittedAt
@@ -107,14 +108,18 @@ export type TurnEvidence = {
   readonly disclosureAllowed: boolean | null;
   readonly disclosureRefusalReason: string | null;
   /**
-   * Additive bounded refusal evidence. `disclosureChannel` keeps its legacy
-   * intent-derived semantics; these fields expose the declared intent, the
-   * resolved canonical family (or closed `UNKNOWN`), the proposal status and
-   * the relevant ledger verdicts. No raw model labels/content are carried.
+   * Additive bounded refusal evidence. `disclosureChannel` reports the family
+   * actually evaluated (including the resolved proposal on a refusal); these
+   * fields expose the declared intent, the resolved canonical family (or
+   * closed `UNKNOWN`), the typed scope, the source-reference outcome, the
+   * proposal status and the relevant ledger verdicts. No raw model
+   * labels/content are carried.
    */
   readonly disclosureDeclaredIntent: string | null;
   readonly disclosureProposedFamily: string | null;
+  readonly disclosureProposedScope: string | null;
   readonly disclosureProposalStatus: string | null;
+  readonly disclosureSourceReference: string | null;
   readonly disclosureLedgerIncluded: boolean | null;
   readonly disclosureLedgerDisclosable: boolean | null;
   readonly knowledgeGapCategory: string | null;
@@ -326,7 +331,10 @@ export function buildTurnEvidence(
     disclosureRefusalReason: observability?.disclosure?.refusalReason ?? null,
     disclosureDeclaredIntent: observability?.disclosure?.declaredIntent ?? null,
     disclosureProposedFamily: observability?.disclosure?.proposedFamily ?? null,
+    disclosureProposedScope: observability?.disclosure?.proposedScope ?? null,
     disclosureProposalStatus: observability?.disclosure?.proposalStatus ?? null,
+    disclosureSourceReference:
+      observability?.disclosure?.sourceReference ?? null,
     disclosureLedgerIncluded: observability?.disclosure?.ledgerIncluded ?? null,
     disclosureLedgerDisclosable:
       observability?.disclosure?.ledgerDisclosable ?? null,
@@ -421,7 +429,9 @@ export const TURN_EVIDENCE_ALLOWED_STRING_FIELDS = new Set<string>([
   "disclosureRefusalReason",
   "disclosureDeclaredIntent",
   "disclosureProposedFamily",
+  "disclosureProposedScope",
   "disclosureProposalStatus",
+  "disclosureSourceReference",
   "knowledgeGapCategory",
   "finalOutcome",
   "outboundDeliveryErrorCode",

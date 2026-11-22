@@ -1,5 +1,37 @@
 # FlowPilot — Build State
 
+## Authoritative service-catalog pricing repair (Draft PR, v0.79.23) — 22 November 2026
+
+- **Baseline:** current `main` `8dc01b866b5eb5e9855f94939e709602b48df07e`
+  (`0.79.22`). The existing PR #88 branch was not reset or overwritten.
+- **Live symptom:** an aggregate "all available services and their prices"
+  request reached a successful provider turn and a `RESOLVED` `service.price`
+  proposal, but the gate's single-service contract required one exact service
+  id, so the turn became `POLICY_REFUSED` / `UNAVAILABLE_IN_REQUEST` and the
+  customer received only the safe handoff acknowledgment. Delivery succeeded;
+  the raw model source reference is not retained and is not claimed.
+- **Repair:** additive typed `knowledgeRef.scope` (`single` | `catalog`).
+  Catalog scope is valid only for `service.price`, carries no single source
+  id, and renders every carried active/tenant-proven service. Stored
+  fixed/range/starting/case-dependent prices are formatted by the ONE
+  existing formatter; an unpriced service is rendered as
+  «السعر غير متاح — يحتاج تأكيد من الفريق» instead of being omitted or
+  invented. Exact single-service price, unknown/foreign/ambiguous references,
+  inactive rows, tenant scope and the price task gate are unchanged.
+- **Diagnostics:** refusals now report the family actually evaluated in
+  `disclosureChannel` (no generic-FAQ fallback for a price/catalog refusal),
+  plus bounded `disclosureProposedScope` and `disclosureSourceReference`
+  outcomes. `POLICY_REFUSED` operator copy states that a safe reply was sent
+  and does not imply a delivery failure.
+- **Tests:** focused cases in `check:ai-disclosure`, `check:service-price`,
+  `check:unknown-information-handoff`, `check:turn-evidence` and
+  `check:handoff-cause`, including catalog scope with fixed/range/conditional/
+  missing prices, exact single-service ids, source conflicts, empty/inactive/
+  cross-tenant catalogs, truthfully resolved refusal channels, and a refusal
+  with successful delivery. Required CI on the PR HEAD is the authority.
+- **Not done:** no merge, deploy, migration, paid AI call, Telegram send,
+  conversation reset or production write.
+
 ## PR88 reconciliation completeness repair (Draft PR #88) — 20 November 2026
 
 - **Reviewed baseline:** PR88 HEAD `fc7b8bc946c24ccc570f14f5bb21b3ca7a785a50`

@@ -34,12 +34,14 @@ import type {
   AiResponse,
   AiTurnPlan,
   DisclosureProposalStatus,
+  KnowledgeScope,
   ProposedKnowledgeFamilyObservation,
 } from "@/features/conversations/server/ai-contract";
 import {
   synthesizeDecisionGoals,
   synthesizeTurnPlan,
 } from "@/features/conversations/server/ai-contract";
+import type { DisclosureSourceReference } from "@/features/conversations/server/ai-disclosure";
 import type { JevSemanticEvidence } from "@/server/integrations/ai/jev-semantic-strategy";
 import type { AiProviderErrorCode } from "@/server/integrations/ai/types";
 
@@ -92,10 +94,11 @@ export type TurnContextChannels = {
  */
 export type TurnDisclosureObservation = {
   /**
-   * LEGACY field — its historical semantics are preserved exactly:
-   * a disclosed reply reports the ledger family that backed it; a refusal
-   * reports the intent-derived primary family (or `declared-intent`), which
-   * is NOT necessarily the model's proposed family.
+   * The knowledge family the gate actually evaluated. A disclosed reply
+   * reports the ledger family that backed it; a refusal reports the resolved
+   * proposed family, the closed `UNKNOWN` sentinel, or `unresolved` when no
+   * family was declared. A routing action reports `routing-action`. It never
+   * falls back to the intent-derived FAQ family on a refusal.
    */
   readonly channel: string;
   readonly allowed: boolean;
@@ -113,6 +116,10 @@ export type TurnDisclosureObservation = {
   readonly proposedFamily?: ProposedKnowledgeFamilyObservation;
   /** Additive refusal evidence: how the family proposal resolved. */
   readonly proposalStatus?: DisclosureProposalStatus;
+  /** Additive refusal evidence: the declared typed scope, when present. */
+  readonly proposedScope?: KnowledgeScope | null;
+  /** Additive refusal evidence: the bounded source-reference outcome. */
+  readonly sourceReference?: DisclosureSourceReference;
   /**
    * Additive refusal evidence: the relevant ledger record's verdicts when the
    * refusal concerned a concrete family; null when not applicable.

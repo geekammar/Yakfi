@@ -362,6 +362,94 @@ function main(): void {
     cliticMissingTurn.request.services[0]?.price === undefined,
   );
 
+  // A catalogue-wide price request on the production structured capability:
+  // all active services are carried with their stored price shapes, a missing
+  // price stays absent (never fabricated), and an inactive row is excluded by
+  // the builder even if it reaches the source list.
+  const catalogPriceTurn = buildAiContext({
+    scope: { businessId: TENANT },
+    sources: {
+      business: {
+        businessId: TENANT,
+        name: "عيادة الأمل",
+        faqs: [],
+      },
+      services: [
+        {
+          id: "svc-fixed",
+          businessId: TENANT,
+          name: "تنظيف الأسنان",
+          durationMinutes: 30,
+          ...FIXED,
+        },
+        {
+          id: "svc-range",
+          businessId: TENANT,
+          name: "حشو العصب",
+          durationMinutes: 30,
+          priceType: "RANGE",
+          priceAmount: 350,
+          priceMaxAmount: 600,
+          priceCurrency: "EGP",
+        },
+        {
+          id: "svc-conditional",
+          businessId: TENANT,
+          name: "جلسة تجميلية",
+          durationMinutes: 30,
+          priceType: "CONDITIONAL",
+          priceNote: "حسب الحالة",
+        },
+        {
+          id: "svc-unpriced",
+          businessId: TENANT,
+          name: "كشف جراحة",
+          durationMinutes: 30,
+          priceType: null,
+        },
+        {
+          id: "svc-inactive",
+          businessId: TENANT,
+          name: "خدمة موقوفة",
+          durationMinutes: 30,
+          isActive: false,
+          ...FIXED,
+        },
+      ],
+      conversation: { status: "AI_ACTIVE", recentMessages: [] },
+      message: "ممكن أعرف الخدمات المتاحة وسعر كل خدمة؟",
+      requiredSemanticCapability: "structured_turn",
+    },
+  });
+  const catalogServices = catalogPriceTurn.request.services;
+  check(
+    "الظهور: طلب كتالوج+أسعار يحمل الخدمات النشطة فقط (الموقوفة مستبعدة)",
+    catalogServices.length === 4 &&
+      !catalogServices.some((service) => service.name === "خدمة موقوفة"),
+  );
+  check(
+    "الظهور: الأشكال الثابتة والنطاق والحسب-حالة تُنسّق كما هي",
+    catalogServices.find((service) => service.name === "تنظيف الأسنان")
+      ?.price === "300 جنيه" &&
+      catalogServices.find((service) => service.name === "حشو العصب")
+        ?.price === "من 350 إلى 600 جنيه" &&
+      catalogServices.find((service) => service.name === "جلسة تجميلية")
+        ?.price === "حسب الحالة",
+  );
+  check(
+    "الظهور: الخدمة بلا سعر لا تحمل سعراً مُختلقاً داخل الكتالوج",
+    catalogServices.find((service) => service.name === "كشف جراحة")?.price ===
+      undefined,
+  );
+  const catalogPriceFamily = catalogPriceTurn.facts.find(
+    (fact) => fact.key === "service.price",
+  );
+  check(
+    "الظهور: عائلة service.price مُدرجة وقابلة للإفصاح على طلب الكتالوج",
+    catalogPriceFamily?.included === true &&
+      catalogPriceFamily?.disclosable === true,
+  );
+
   // ── DISCLOSURE (real gate) ───────────────────────────────────────────────
 
   const priceDisclosure = enforceDisclosure({

@@ -742,6 +742,19 @@ async function main(): Promise<void> {
         row?.cause === "POLICY_REFUSED" &&
         !h.sent.some((text) => text.includes("500")),
     );
+    check(
+      "E6-b. POLICY_REFUSED لا يعني فشل الإرسال: الرد الآمن وصل فعلاً",
+      isSuccess(result) &&
+        result.delivery?.delivered === true &&
+        h.sent.length === 1 &&
+        result.handoffCause === "POLICY_REFUSED" &&
+        cause
+          .describeHandoffCause("POLICY_REFUSED")
+          .includes("تم إرسال رد آمن") &&
+        !/فشل|تعذّر الإرسال|لم يتم الإرسال/.test(
+          cause.describeHandoffCause("POLICY_REFUSED"),
+        ),
+    );
   }
 
   // E7 — invalid/absent AI output (no control telemetry → AI_FAILURE).

@@ -577,7 +577,11 @@ async function main(): Promise<void> {
   const refuseHarness = buildHarness({
     address: null,
     services: PILOT_SERVICES,
-    aiResponse: aiReply("نحن في شارع الجمهورية بوسط البلد."),
+    aiResponse: aiReply(
+      "نحن في شارع الجمهورية بوسط البلد.",
+      "FAQ",
+      "business.address",
+    ),
   });
   const refuse = await run(refuseHarness, {
     text: "أين موقعكم؟",
@@ -593,9 +597,12 @@ async function main(): Promise<void> {
       refuse.knowledgeGap === undefined,
   );
   check(
-    "4c-b. التقرير يسجّل رفض البوابة بعائلة العملاء وسبب مُصنَّف",
+    "4c-b. التقرير يسجّل العائلة الفعلية التي رفضتها البوابة لا FAQ العامة",
     refuseEvidence?.disclosureAllowed === false &&
-      refuseEvidence?.disclosureChannel === "business.faqs" &&
+      refuseEvidence?.disclosureChannel === "business.address" &&
+      refuseEvidence?.disclosureProposedFamily === "business.address" &&
+      refuseEvidence?.disclosureProposalStatus === "RESOLVED" &&
+      refuseEvidence?.disclosureSourceReference === "NOT_APPLICABLE" &&
       refuseEvidence?.disclosureRefusalReason !== null &&
       refuseEvidence?.disclosureRefusalReason !== undefined,
   );

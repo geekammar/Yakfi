@@ -94,7 +94,6 @@ import {
   parseAiResponse,
 } from "@/features/conversations/server/ai-contract";
 import {
-  TASK_SUPPORT_FAMILIES,
   enforceDisclosure,
   isExplicitIdentityGoal,
 } from "@/features/conversations/server/ai-disclosure";
@@ -9354,11 +9353,13 @@ async function runInboundTurn(
     turnObservability = {
       ...turnObservability,
       disclosure: {
+        // Report the family actually evaluated. On a refusal this is the
+        // resolved proposal (or the closed UNKNOWN/unresolved sentinel), not
+        // the generic FAQ family the declared intent would imply.
         channel:
           disclosure.kind === "disclosed"
             ? (disclosure.support[0] ?? "routing-action")
-            : (TASK_SUPPORT_FAMILIES[validated.intent].family ??
-              "declared-intent"),
+            : (disclosure.diagnostics.proposedFamily ?? "unresolved"),
         allowed: disclosure.kind === "disclosed",
         declaredIntent: validated.intent,
         ...(disclosure.kind === "requires-human"
@@ -9366,6 +9367,8 @@ async function runInboundTurn(
               refusalReason: disclosure.reason,
               proposedFamily: disclosure.diagnostics.proposedFamily,
               proposalStatus: disclosure.diagnostics.proposalStatus,
+              proposedScope: disclosure.diagnostics.proposedScope,
+              sourceReference: disclosure.diagnostics.sourceReference,
               ledgerIncluded: disclosure.diagnostics.ledgerIncluded,
               ledgerDisclosable: disclosure.diagnostics.ledgerDisclosable,
             }

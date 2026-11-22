@@ -122,8 +122,9 @@ export const HANDOFF_CAUSE_PRESENTATIONS: Readonly<
     description: "لم يتّضح قصد العميل رغم طلب التوضيح من المساعد.",
   },
   POLICY_REFUSED: {
-    label: "تعذّر تأكيد الرد",
-    description: "لم يستطع المساعد تأكيد الرد من المصادر الموثوقة للمنشأة.",
+    label: "رد غير مؤكّد المصدر",
+    description:
+      "لم يعتمد المساعد الرد لعدم ثبوته من المصادر الموثوقة، وتم إرسال رد آمن وتحويل المحادثة إلى الفريق.",
   },
   PROVIDER_FAILURE: {
     label: "مشكلة مؤقتة",

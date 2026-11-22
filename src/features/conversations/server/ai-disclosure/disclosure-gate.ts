@@ -42,6 +42,7 @@ import {
   type AiResponse,
   type DisclosureProposalStatus,
   type KnowledgeFamily,
+  type KnowledgeScope,
   type ProposedKnowledgeFamilyObservation,
 } from "@/features/conversations/server/ai-contract";
 import {
@@ -49,6 +50,7 @@ import {
   buildBusinessAddressContent,
   buildBusinessIdentityContent,
   buildServiceCatalogContent,
+  buildServiceCatalogPriceContent,
   buildServiceDescriptionContent,
   buildServicePriceContent,
 } from "@/features/conversations/server/conversation-ai";
@@ -58,6 +60,7 @@ export {
   buildBusinessAddressContent,
   buildBusinessIdentityContent,
   buildServiceCatalogContent,
+  buildServiceCatalogPriceContent,
   buildServiceDescriptionContent,
   buildServicePriceContent,
 };
@@ -155,11 +158,32 @@ const CANONICAL_KNOWLEDGE_FAMILY_CHANNELS: Readonly<
 };
 
 /**
+ * Bounded source-reference outcome for one refusal. It never carries the raw
+ * source id: the operator only learns whether a reference was required and
+ * missing, matched a carried source, or could not be resolved unambiguously.
+ */
+export const DISCLOSURE_SOURCE_REFERENCE_VALUES = [
+  /** The family requires a source reference, but none was supplied. */
+  "NONE",
+  /** The supplied reference matched exactly one carried source. */
+  "MATCHED",
+  /** A reference was supplied but matched no carried source. */
+  "UNKNOWN",
+  /** A reference matched multiple carried sources. */
+  "AMBIGUOUS",
+  /** The family/scope is aggregate or does not require a source reference. */
+  "NOT_APPLICABLE",
+] as const;
+
+export type DisclosureSourceReference =
+  (typeof DISCLOSURE_SOURCE_REFERENCE_VALUES)[number];
+
+/**
  * Bounded operator evidence for ONE disclosure refusal. It never carries the
- * raw model label, reply text, source content, customer text or a secret:
- * `unknownFamily`/`conflict`/`missing` are collapsed into the closed
- * `proposalStatus`, and only a canonical family (or the closed `UNKNOWN`
- * sentinel) is exposed.
+ * raw model label, reply text, source id, source content, customer text or a
+ * secret: `unknownFamily`/`conflict`/`missing` are collapsed into the closed
+ * `proposalStatus`, only a canonical family (or the closed `UNKNOWN` sentinel)
+ * is exposed, and `sourceReference` reports only the reference OUTCOME.
  */
 export type DisclosureRefusalDiagnostics = {
   /** The validated declared intent that proposed the reply. */
@@ -168,6 +192,10 @@ export type DisclosureRefusalDiagnostics = {
   readonly proposalStatus: DisclosureProposalStatus;
   /** Canonical resolved family, the closed UNKNOWN sentinel, or null. */
   readonly proposedFamily: ProposedKnowledgeFamilyObservation;
+  /** Typed scope of the resolved proposal (single/catalog), when declared. */
+  readonly proposedScope: KnowledgeScope | null;
+  /** Bounded source-reference outcome. */
+  readonly sourceReference: DisclosureSourceReference;
   /** The relevant ledger record's included verdict, when applicable. */
   readonly ledgerIncluded: boolean | null;
   /** The relevant ledger record's disclosable verdict, when applicable. */
@@ -339,6 +367,7 @@ export function supportFamilyForProposedKnowledge(
 export type ResolvedKnowledgeProposal = {
   family: KnowledgeFamily | null;
   sourceId: string | null;
+  scope: KnowledgeScope | null;
   conflict: boolean;
   invalidFamily: boolean;
   status: DisclosureProposalStatus;
@@ -348,7 +377,13 @@ function extractEntityProposal(
   entity:
     | {
         knowledgeRef?:
-          string | { family?: string; sourceId?: string | null } | null;
+          | string
+          | {
+              family?: string;
+              sourceId?: string | null;
+              scope?: KnowledgeScope | null;
+            }
+          | null;
         sourceId?: string | null;
         requiredKnowledge?: string | null;
       }
@@ -357,16 +392,18 @@ function extractEntityProposal(
 ): {
   family: KnowledgeFamily | null;
   sourceId: string | null;
+  scope: KnowledgeScope | null;
   conflict: boolean;
   invalidFamily: boolean;
 } {
   let family: KnowledgeFamily | null = null;
   let sourceId: string | null = null;
+  let scope: KnowledgeScope | null = null;
   let conflict = false;
   let invalidFamily = false;
 
   if (!entity) {
-    return { family, sourceId, conflict, invalidFamily };
+    return { family, sourceId, scope, conflict, invalidFamily };
   }
 
   // 1. knowledgeRef
@@ -398,6 +435,9 @@ function extractEntityProposal(
     }
     if (entity.knowledgeRef.sourceId) {
       sourceId = entity.knowledgeRef.sourceId.trim();
+    }
+    if (entity.knowledgeRef.scope) {
+      scope = entity.knowledgeRef.scope;
     }
   }
 
@@ -435,12 +475,12 @@ function extractEntityProposal(
     }
   }
 
-  return { family, sourceId, conflict, invalidFamily };
+  return { family, sourceId, scope, conflict, invalidFamily };
 }
 
 /**
- * Extract the structured knowledge family and source reference proposal
- * from a response or active goal without inspecting free-text prose.
+ * Extract the structured knowledge family, source reference and typed scope
+ * proposal from a response or active goal without inspecting free-text prose.
  */
 export function resolveKnowledgeProposal(
   response: AiResponse,
@@ -466,9 +506,22 @@ export function resolveKnowledgeProposal(
   ) {
     conflict = true;
   }
+  if (goalProp.scope && respProp.scope && goalProp.scope !== respProp.scope) {
+    conflict = true;
+  }
 
   const family = goalProp.family ?? respProp.family ?? null;
   const sourceId = goalProp.sourceId ?? respProp.sourceId ?? null;
+  const scope = goalProp.scope ?? respProp.scope ?? null;
+
+  // Scope is only meaningful for the service-price family. `catalog` is an
+  // aggregate scope and therefore cannot also carry a single source id;
+  // either contradiction fails closed rather than guessing intent.
+  if (scope && family) {
+    if (family !== "service.price") conflict = true;
+    else if (scope === "catalog" && sourceId) conflict = true;
+  }
+
   const status: DisclosureProposalStatus = conflict
     ? "CONFLICT"
     : invalidFamily
@@ -477,7 +530,7 @@ export function resolveKnowledgeProposal(
         ? "RESOLVED"
         : "MISSING";
 
-  return { family, sourceId, conflict, invalidFamily, status };
+  return { family, sourceId, scope, conflict, invalidFamily, status };
 }
 
 /**
@@ -517,10 +570,12 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
   // closed machine values only: no raw model label, reply text or source id.
   let proposalStatus: DisclosureProposalStatus = "MISSING";
   let proposedFamily: ProposedKnowledgeFamilyObservation = null;
+  let proposedScope: KnowledgeScope | null = null;
 
   const refuse = (
     reason: DisclosureRefusalReason,
     record?: ContextFactRecord | null,
+    sourceReference: DisclosureSourceReference = "NOT_APPLICABLE",
   ): DisclosureResult => ({
     kind: "requires-human",
     reason,
@@ -528,6 +583,8 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
       declaredIntent: response.intent,
       proposalStatus,
       proposedFamily,
+      proposedScope,
+      sourceReference,
       ledgerIncluded: record ? record.included : null,
       ledgerDisclosable: record ? record.disclosable : null,
     },
@@ -564,6 +621,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
   // closed instead of being erased by the identity label.
   const proposal = resolveKnowledgeProposal(response, currentAnswerGoal);
   proposalStatus = proposal.status;
+  proposedScope = proposal.scope;
   proposedFamily =
     proposal.status === "RESOLVED"
       ? proposal.family
@@ -716,10 +774,10 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
             (s) => s.id === sId || s.name.trim() === sId,
           );
           if (matches.length === 0) {
-            return refuse("UNAVAILABLE_IN_REQUEST", record);
+            return refuse("UNAVAILABLE_IN_REQUEST", record, "UNKNOWN");
           }
           if (matches.length > 1) {
-            return refuse("AMBIGUOUS_MATCH", record);
+            return refuse("AMBIGUOUS_MATCH", record, "AMBIGUOUS");
           }
           return {
             kind: "disclosed",
@@ -738,18 +796,70 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
     }
     case "service.price": {
       const aggregateRecord = ledger.find((f) => f.key === "service.price");
+
+      // Catalog scope is an explicit, typed aggregate request: the model
+      // declared that the customer asked for the whole service catalog with
+      // prices. The gate renders ONLY the carried, tenant-proven, active
+      // services (the builder already excluded foreign/inactive rows) and
+      // states a missing stored price truthfully. A single source id is
+      // never accepted for this aggregate scope.
+      if (proposal.scope === "catalog") {
+        if (proposal.sourceId) {
+          return refuse("AMBIGUOUS_MATCH", aggregateRecord ?? null);
+        }
+        if (context.request.services.length === 0) {
+          return refuse(
+            "UNAVAILABLE_IN_REQUEST",
+            aggregateRecord ?? null,
+            "NOT_APPLICABLE",
+          );
+        }
+        if (!aggregateRecord || !aggregateRecord.included) {
+          return refuse(
+            "EXCLUDED_FROM_CONTEXT",
+            aggregateRecord ?? null,
+            "NOT_APPLICABLE",
+          );
+        }
+        if (!aggregateRecord.disclosable) {
+          return refuse("NOT_DISCLOSABLE", aggregateRecord, "NOT_APPLICABLE");
+        }
+        return {
+          kind: "disclosed",
+          response,
+          support: ["service.price"],
+          renderedContent: buildServiceCatalogPriceContent(
+            context.request.services,
+          ),
+        };
+      }
+
+      // Single-service scope (the established contract): one EXACT opaque
+      // service id must match one carried service.
       if (!proposal.sourceId) {
-        return refuse("UNAVAILABLE_IN_REQUEST", aggregateRecord ?? null);
+        return refuse(
+          "UNAVAILABLE_IN_REQUEST",
+          aggregateRecord ?? null,
+          "NONE",
+        );
       }
       const sId = proposal.sourceId.trim();
       // The model must reference the EXACT opaque service id exposed in the
       // request. A service name is never accepted as an id fallback.
       const matches = context.request.services.filter((s) => s.id === sId);
       if (matches.length === 0) {
-        return refuse("UNAVAILABLE_IN_REQUEST", aggregateRecord ?? null);
+        return refuse(
+          "UNAVAILABLE_IN_REQUEST",
+          aggregateRecord ?? null,
+          "UNKNOWN",
+        );
       }
       if (matches.length > 1) {
-        return refuse("AMBIGUOUS_MATCH", aggregateRecord ?? null);
+        return refuse(
+          "AMBIGUOUS_MATCH",
+          aggregateRecord ?? null,
+          "AMBIGUOUS",
+        );
       }
       const matchedService = matches[0]!;
       const record = ledger.find(
@@ -761,13 +871,13 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         typeof matchedService.price !== "string" ||
         matchedService.price.trim().length === 0
       ) {
-        return refuse("UNAVAILABLE_IN_REQUEST", record ?? null);
+        return refuse("UNAVAILABLE_IN_REQUEST", record ?? null, "MATCHED");
       }
       if (!record || !record.included) {
-        return refuse("EXCLUDED_FROM_CONTEXT", record ?? null);
+        return refuse("EXCLUDED_FROM_CONTEXT", record ?? null, "MATCHED");
       }
       if (!record.disclosable) {
-        return refuse("NOT_DISCLOSABLE", record);
+        return refuse("NOT_DISCLOSABLE", record, "MATCHED");
       }
       return {
         kind: "disclosed",
@@ -784,17 +894,29 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         (f) => f.key === "service.description",
       );
       if (!proposal.sourceId) {
-        return refuse("UNAVAILABLE_IN_REQUEST", aggregateRecord ?? null);
+        return refuse(
+          "UNAVAILABLE_IN_REQUEST",
+          aggregateRecord ?? null,
+          "NONE",
+        );
       }
       const sId = proposal.sourceId.trim();
       const matches = context.request.services.filter(
         (s) => s.id === sId || s.name.trim() === sId,
       );
       if (matches.length === 0) {
-        return refuse("UNAVAILABLE_IN_REQUEST", aggregateRecord ?? null);
+        return refuse(
+          "UNAVAILABLE_IN_REQUEST",
+          aggregateRecord ?? null,
+          "UNKNOWN",
+        );
       }
       if (matches.length > 1) {
-        return refuse("AMBIGUOUS_MATCH", aggregateRecord ?? null);
+        return refuse(
+          "AMBIGUOUS_MATCH",
+          aggregateRecord ?? null,
+          "AMBIGUOUS",
+        );
       }
       const matchedService = matches[0]!;
       const record = ledger.find(
@@ -806,13 +928,13 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         typeof matchedService.description !== "string" ||
         matchedService.description.trim().length === 0
       ) {
-        return refuse("UNAVAILABLE_IN_REQUEST", record ?? null);
+        return refuse("UNAVAILABLE_IN_REQUEST", record ?? null, "MATCHED");
       }
       if (!record || !record.included) {
-        return refuse("EXCLUDED_FROM_CONTEXT", record ?? null);
+        return refuse("EXCLUDED_FROM_CONTEXT", record ?? null, "MATCHED");
       }
       if (!record.disclosable) {
-        return refuse("NOT_DISCLOSABLE", record);
+        return refuse("NOT_DISCLOSABLE", record, "MATCHED");
       }
       return {
         kind: "disclosed",
@@ -827,7 +949,7 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
     case "business.faqs": {
       const record = ledger.find((f) => f.key === "business.faqs");
       if (!proposal.sourceId) {
-        return refuse("UNAVAILABLE_IN_REQUEST", record ?? null);
+        return refuse("UNAVAILABLE_IN_REQUEST", record ?? null, "NONE");
       }
       if (!record || !record.included) {
         return refuse("EXCLUDED_FROM_CONTEXT", record ?? null);
@@ -840,14 +962,14 @@ export function enforceDisclosure(input: DisclosureInput): DisclosureResult {
         (f) => (f.id && f.id === sId) || f.question.trim() === sId,
       );
       if (matches.length === 0) {
-        return refuse("UNAVAILABLE_IN_REQUEST", record);
+        return refuse("UNAVAILABLE_IN_REQUEST", record, "UNKNOWN");
       }
       if (matches.length > 1) {
-        return refuse("AMBIGUOUS_MATCH", record);
+        return refuse("AMBIGUOUS_MATCH", record, "AMBIGUOUS");
       }
       const matchedFaq = matches[0]!;
       if (!matchedFaq.answer || matchedFaq.answer.trim().length === 0) {
-        return refuse("UNAVAILABLE_IN_REQUEST", record);
+        return refuse("UNAVAILABLE_IN_REQUEST", record, "MATCHED");
       }
       return {
         kind: "disclosed",

@@ -55,7 +55,10 @@ import {
   TASK_SUPPORT_FAMILIES,
   enforceDisclosure,
 } from "../src/features/conversations/server/ai-disclosure";
-import { SAFE_HANDOFF_REPLIES } from "../src/features/conversations/server/conversation-ai";
+import {
+  SAFE_HANDOFF_REPLIES,
+  SERVICE_PRICE_UNAVAILABLE_TEXT,
+} from "../src/features/conversations/server/conversation-ai";
 import {
   AI_MUST_NOT_RESOLVE_CONFLICTS,
   mostRestrictive,
@@ -475,6 +478,12 @@ async function main(): Promise<void> {
           ? priceNameSourceTurn.decision.reason
           : null,
         "UNAVAILABLE_IN_REQUEST",
+      ) &&
+      eq(
+        priceNameSourceTurn.decision.kind === "requires-human"
+          ? priceNameSourceTurn.decision.diagnostics.sourceReference
+          : null,
+        "UNKNOWN",
       ),
   );
   const priceMissingSourceTurn = gateReply({
@@ -501,6 +510,12 @@ async function main(): Promise<void> {
           ? priceMissingSourceTurn.decision.reason
           : null,
         "UNAVAILABLE_IN_REQUEST",
+      ) &&
+      eq(
+        priceMissingSourceTurn.decision.kind === "requires-human"
+          ? priceMissingSourceTurn.decision.diagnostics.sourceReference
+          : null,
+        "NONE",
       ),
   );
   const ambiguousPriceDecision = enforceDisclosure({
@@ -530,6 +545,259 @@ async function main(): Promise<void> {
           ? ambiguousPriceDecision.reason
           : null,
         "AMBIGUOUS_MATCH",
+      ) &&
+      eq(
+        ambiguousPriceDecision.kind === "requires-human"
+          ? ambiguousPriceDecision.diagnostics.sourceReference
+          : null,
+        "AMBIGUOUS",
+      ),
+  );
+
+  // ── 1f6–1f10. Aggregate service-catalog PRICE scope ───────────────────────
+  // A catalogue-wide request is distinguished from a single-service request
+  // ONLY by the model's typed `knowledgeRef.scope: "catalog"`. The gate then
+  // renders every carried, active, tenant-proven service with its stored
+  // price, and states a missing price truthfully instead of suppressing it or
+  // inventing a number.
+  const cataloguePriceServices = [
+    serviceFact("تنظيف الأسنان", {
+      priceType: "FIXED",
+      priceAmount: 300,
+      priceCurrency: "EGP",
+    }),
+    serviceFact("حشو العصب", {
+      priceType: "RANGE",
+      priceAmount: 350,
+      priceMaxAmount: 600,
+      priceCurrency: "EGP",
+    }),
+    serviceFact("جلسة تجميلية", {
+      priceType: "CONDITIONAL",
+      priceNote: "حسب الحالة",
+    }),
+    serviceFact("كشف جراحة"),
+    serviceFact("خدمة منشأة أخرى", {
+      businessId: TENANT_B,
+      priceType: "FIXED",
+      priceAmount: 999,
+      priceCurrency: "EGP",
+    }),
+    serviceFact("خدمة موقوفة", {
+      isActive: false,
+      priceType: "FIXED",
+      priceAmount: 888,
+      priceCurrency: "EGP",
+    }),
+  ];
+  const catalogPriceTurn = gateReply({
+    message: "ممكن أعرف الخدمات المتاحة وسعر كل خدمة؟",
+    sources: {
+      business: businessSources({ faqs: [] }),
+      services: cataloguePriceServices,
+      requiredSemanticCapability: "structured_turn",
+    },
+    reply: replyOf("FAQ", "الأسعار تبدأ من 999 جنيه.", {
+      requiredKnowledge: "service.price",
+      knowledgeRef: { family: "service.price", scope: "catalog" },
+    }),
+  });
+  const catalogPriceContent =
+    catalogPriceTurn.decision.kind === "disclosed"
+      ? (catalogPriceTurn.decision.renderedContent ?? "")
+      : "";
+  check(
+    "1f6. طلب كتالوج + أسعار بمدى catalog يُفصح عن القائمة المعتمدة كلها",
+    eq(catalogPriceTurn.decision.kind, "disclosed") &&
+      deepEq(
+        catalogPriceTurn.decision.kind === "disclosed"
+          ? catalogPriceTurn.decision.support
+          : [],
+        ["service.price"],
+      ) &&
+      catalogPriceContent.includes("تنظيف الأسنان") &&
+      catalogPriceContent.includes("حشو العصب") &&
+      catalogPriceContent.includes("جلسة تجميلية") &&
+      catalogPriceContent.includes("كشف جراحة"),
+  );
+  check(
+    "1f7. الأسعار الثابتة والنطاق والحسب-حالة تُنقل بمعناها المخزّن بلا اختراع",
+    catalogPriceContent.includes("300 جنيه") &&
+      catalogPriceContent.includes("من 350 إلى 600 جنيه") &&
+      catalogPriceContent.includes("حسب الحالة") &&
+      catalogPriceContent.includes(SERVICE_PRICE_UNAVAILABLE_TEXT) &&
+      !catalogPriceContent.includes("999") &&
+      !catalogPriceContent.includes("888"),
+  );
+  check(
+    "1f8. الخدمات غير النشطة ومنشأة أخرى لا تدخل قائمة الأسعار",
+    !catalogPriceContent.includes("خدمة موقوفة") &&
+      !catalogPriceContent.includes("خدمة منشأة أخرى"),
+  );
+  const unpricedCatalogTurn = gateReply({
+    message: "ممكن أعرف الخدمات المتاحة وسعر كل خدمة؟",
+    sources: {
+      business: businessSources({ faqs: [] }),
+      services: [serviceFact("كشف جراحة")],
+      requiredSemanticCapability: "structured_turn",
+    },
+    reply: replyOf("FAQ", "كل الخدمات لها أسعار.", {
+      requiredKnowledge: "service.price",
+      knowledgeRef: { family: "service.price", scope: "catalog" },
+    }),
+  });
+  const unpricedCatalogContent =
+    unpricedCatalogTurn.decision.kind === "disclosed"
+      ? (unpricedCatalogTurn.decision.renderedContent ?? "")
+      : "";
+  check(
+    "1f9. كتالوج بلا أسعار مخزّنة يُفصح بالغياب الصريح بدل حجب القائمة",
+    eq(unpricedCatalogTurn.decision.kind, "disclosed") &&
+      unpricedCatalogContent.includes("كشف جراحة") &&
+      unpricedCatalogContent.includes(SERVICE_PRICE_UNAVAILABLE_TEXT),
+  );
+  const catalogPlusSourceTurn = gateReply({
+    message: "ممكن أعرف الخدمات المتاحة وسعر كل خدمة؟",
+    sources: {
+      business: businessSources({ faqs: [] }),
+      services: [
+        serviceFact("تنظيف الأسنان", {
+          priceType: "FIXED",
+          priceAmount: 300,
+          priceCurrency: "EGP",
+        }),
+      ],
+      requiredSemanticCapability: "structured_turn",
+    },
+    reply: replyOf("FAQ", "الأسعار تبدأ من 300 جنيه.", {
+      requiredKnowledge: "service.price",
+      knowledgeRef: {
+        family: "service.price",
+        scope: "catalog",
+        sourceId: "svc-تنظيف الأسنان",
+      },
+    }),
+  });
+  check(
+    "1f10. مدى catalog مع معرف خدمة واحد = رفض آمن (AMBIGUOUS_MATCH)",
+    eq(catalogPlusSourceTurn.decision.kind, "requires-human") &&
+      eq(
+        catalogPlusSourceTurn.decision.kind === "requires-human"
+          ? catalogPlusSourceTurn.decision.reason
+          : null,
+        "AMBIGUOUS_MATCH",
+      ) &&
+      eq(
+        catalogPlusSourceTurn.decision.kind === "requires-human"
+          ? catalogPlusSourceTurn.decision.diagnostics.proposedScope
+          : null,
+        "catalog",
+      ),
+  );
+  const emptyCatalogPriceTurn = gateReply({
+    message: "ممكن أعرف الخدمات المتاحة وسعر كل خدمة؟",
+    sources: {
+      business: businessSources({ faqs: [] }),
+      services: [],
+      requiredSemanticCapability: "structured_turn",
+    },
+    reply: replyOf("FAQ", "الأسعار تبدأ من 300 جنيه.", {
+      requiredKnowledge: "service.price",
+      knowledgeRef: { family: "service.price", scope: "catalog" },
+    }),
+  });
+  check(
+    "1f11. كتالوج فارغ مع مدى catalog = UNAVAILABLE_IN_REQUEST مع تشخيص المصدر",
+    eq(emptyCatalogPriceTurn.decision.kind, "requires-human") &&
+      eq(
+        emptyCatalogPriceTurn.decision.kind === "requires-human"
+          ? emptyCatalogPriceTurn.decision.reason
+          : null,
+        "UNAVAILABLE_IN_REQUEST",
+      ) &&
+      eq(
+        emptyCatalogPriceTurn.decision.kind === "requires-human"
+          ? emptyCatalogPriceTurn.decision.diagnostics.proposedFamily
+          : null,
+        "service.price",
+      ) &&
+      eq(
+        emptyCatalogPriceTurn.decision.kind === "requires-human"
+          ? emptyCatalogPriceTurn.decision.diagnostics.sourceReference
+          : null,
+        "NOT_APPLICABLE",
+      ),
+  );
+  const offTaskPriceBuilt = buildAiContext({
+    scope: { businessId: TENANT_A },
+    sources: makeSources("ممكن أعرف الخدمات المتاحة وسعر كل خدمة؟", {
+      business: businessSources({ faqs: [] }),
+      services: [
+        serviceFact("تنظيف الأسنان", {
+          priceType: "FIXED",
+          priceAmount: 300,
+          priceCurrency: "EGP",
+        }),
+      ],
+      requiredSemanticCapability: "structured_turn",
+    }),
+    taskRelevance: {
+      bookingOrAvailability: false,
+      cancellationOrReschedule: false,
+      providerChoice: false,
+      contactOrIdentity: false,
+      businessIdentity: false,
+      priceOrFee: false,
+      businessInfo: false,
+      serviceInfo: false,
+      serviceCatalog: true,
+    },
+  });
+  const offTaskPriceDecision = enforceDisclosure({
+    response: replyOf("FAQ", "الأسعار تبدأ من 300 جنيه.", {
+      requiredKnowledge: "service.price",
+      knowledgeRef: { family: "service.price", scope: "catalog" },
+    }),
+    context: {
+      request: offTaskPriceBuilt.request,
+      facts: offTaskPriceBuilt.facts,
+    },
+  });
+  check(
+    "1f12. مدى catalog لا يتجاوز بوابة صلة السعر — الرفض عند تعطّل العائلة",
+    eq(offTaskPriceDecision.kind, "requires-human") &&
+      eq(
+        offTaskPriceDecision.kind === "requires-human"
+          ? offTaskPriceDecision.reason
+          : null,
+        "EXCLUDED_FROM_CONTEXT",
+      ),
+  );
+  const missingStoredPriceTurn = gateReply({
+    message: "كم سعر تنظيف الأسنان؟",
+    sources: {
+      business: businessSources({ faqs: [] }),
+      services: [serviceFact(pricedServiceName)],
+    },
+    reply: replyOf("FAQ", "سعر تنظيف الأسنان 300 جنيه.", {
+      requiredKnowledge: "service.price",
+      sourceId: pricedServiceId,
+    }),
+  });
+  check(
+    "1f13. خدمة بمرجع صحيح وسعر غير مخزّن = UNAVAILABLE مع sourceReference=MATCHED",
+    eq(missingStoredPriceTurn.decision.kind, "requires-human") &&
+      eq(
+        missingStoredPriceTurn.decision.kind === "requires-human"
+          ? missingStoredPriceTurn.decision.reason
+          : null,
+        "UNAVAILABLE_IN_REQUEST",
+      ) &&
+      eq(
+        missingStoredPriceTurn.decision.kind === "requires-human"
+          ? missingStoredPriceTurn.decision.diagnostics.sourceReference
+          : null,
+        "MATCHED",
       ),
   );
 
